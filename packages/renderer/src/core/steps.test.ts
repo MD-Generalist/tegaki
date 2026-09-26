@@ -167,3 +167,48 @@ describe('steps that only paint', () => {
     ]);
   });
 });
+
+describe('the unclipped layer', () => {
+  const base = {
+    stroke: {} as StrokeFrame,
+    style: '#000',
+    lineCap: 'round' as const,
+    color: '#000',
+    fontSize: 10,
+    scale: 1,
+    textBox: { minX: 0, minY: 0, maxX: 1, maxY: 1 },
+    frame: { time: 0, strokes: [], active: [] },
+    random: () => Math.random,
+  };
+  const context = (log: string[], name: string) =>
+    ({ save: () => log.push(`${name}.save`), restore: () => log.push(`${name}.restore`) }) as unknown as CanvasRenderingContext2D;
+
+  test('without one, it is the canvas itself', () => {
+    let same = false;
+    const ctx = context([], 'ctx');
+    const plugin: TegakiPlugin = {
+      name: 'p',
+      paint: (s, next) => {
+        same = s.unclipped === s.ctx;
+        next(s);
+      },
+    };
+    paintWith(
+      [plugin],
+      () => {},
+      () => {},
+    )({ ...base, ctx });
+    expect(same).toBe(true);
+  });
+
+  test('with one, its state is saved and restored around each hook, as the canvas is', () => {
+    const log: string[] = [];
+    const plugin: TegakiPlugin = { name: 'p', paint: (s, next) => next(s) };
+    paintWith(
+      [plugin],
+      () => {},
+      () => {},
+    )({ ...base, ctx: context(log, 'ctx'), unclipped: context(log, 'layer') });
+    expect(log).toEqual(['ctx.save', 'layer.save', 'layer.restore', 'ctx.restore']);
+  });
+});

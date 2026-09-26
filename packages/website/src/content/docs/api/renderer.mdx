@@ -231,6 +231,13 @@ const swell: TegakiPlugin = {
 
 `paint` is called for every stroke on every frame, including the ones the pen hasn't reached (their `stroke.state` is `'pending'`), so a plugin can decide for itself what shows when: stamp a whole glyph the moment its first stroke starts, the way a typewriter does, or start from the text written out and rub it away. The default painter paints only what's drawn, so a pending stroke passed on unchanged shows nothing; to show it, pass it on with `state: 'done'` and the `progress` you want. Anything you draw directly, rather than through `next`, should check `stroke.state` first.
 
+With clip-to-text on, everything painted on `ctx` is cut to the letters' shapes once the strokes are drawn. To paint past their edges (a wide brush, a pass around the ink, flecks off the line), paint on `unclipped` instead: pass the stroke on as `next({ ...stroke, ctx: stroke.unclipped })`, or draw on it directly. It's a layer of its own, laid under the clipped ink before the `ink` hooks run, so a glow or a shadow still sees it as ink. With clip-to-text off it's `ctx` itself.
+
+```ts
+// A broad nib's full width, whether or not the text is clipped.
+const unclippedInk: TegakiPlugin = { name: 'unclipped', paint: (s, next) => next({ ...s, ctx: s.unclipped }) };
+```
+
 ```ts
 const shadow: TegakiPlugin = {
   name: 'shadow',

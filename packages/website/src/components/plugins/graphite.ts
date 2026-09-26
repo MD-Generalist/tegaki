@@ -164,22 +164,24 @@ export const graphitePlugin = createPlugin({
         const { stroke, ctx, fontSize } = s;
         const line = cached(lines, stroke, () => stroke.path.map((p) => ({ ...p, width: p.width * weight })));
         next({ ...s, style: patternFor(ctx, s.random('graphite')), stroke: { ...stroke, path: line } });
-        if (shed <= 0) return;
+        if (shed <= 0 || stroke.state === 'pending') return;
         const list = cached(flecks, stroke, () => splinters(stroke.path, fontSize, shed, s.random(`splinter:${stroke.id}`)));
-        ctx.fillStyle = gray;
+        // Off the line, so on the layer clip-to-text leaves alone.
+        const off = s.unclipped;
+        off.fillStyle = gray;
         for (const f of list) {
           if (f.t > stroke.progress) continue;
           // A sliver: long and thin, pointed at both ends.
           const dx = Math.cos(f.angle) * f.length * 0.5;
           const dy = Math.sin(f.angle) * f.length * 0.5;
           const w = f.length * 0.22;
-          ctx.beginPath();
-          ctx.moveTo(f.x - dx, f.y - dy);
-          ctx.lineTo(f.x - dy * (w / f.length), f.y + dx * (w / f.length));
-          ctx.lineTo(f.x + dx, f.y + dy);
-          ctx.lineTo(f.x + dy * (w / f.length) * 0.6, f.y - dx * (w / f.length) * 0.6);
-          ctx.closePath();
-          ctx.fill();
+          off.beginPath();
+          off.moveTo(f.x - dx, f.y - dy);
+          off.lineTo(f.x - dy * (w / f.length), f.y + dx * (w / f.length));
+          off.lineTo(f.x + dx, f.y + dy);
+          off.lineTo(f.x + dy * (w / f.length) * 0.6, f.y - dx * (w / f.length) * 0.6);
+          off.closePath();
+          off.fill();
         }
       },
       underlay({ ctx, frame, fontSize, random }) {

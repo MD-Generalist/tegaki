@@ -127,7 +127,10 @@ export function outlineWith(
 }
 
 /** A stroke to paint, before the chain tells each plugin its drawing (`step`). */
-export type StrokePaintInput = Omit<TegakiStrokePaintContext, 'step'> & { step?: number };
+export type StrokePaintInput = Omit<TegakiStrokePaintContext, 'step' | 'unclipped'> & {
+  step?: number;
+  unclipped?: CanvasRenderingContext2D;
+};
 
 /**
  * Every `paint` hook as a chain: the first plugin's `next` is the second's
@@ -149,19 +152,24 @@ export function paintWith(
     const inner = next;
     const step = steps?.get(plugin) ?? 0;
     next = (input) => {
-      const stroke = (input.step === step ? input : { ...input, step }) as TegakiStrokePaintContext;
+      const stroke = (
+        input.step === step && input.unclipped ? input : { ...input, step, unclipped: input.unclipped ?? input.ctx }
+      ) as TegakiStrokePaintContext;
+      const layer = stroke.unclipped !== stroke.ctx ? stroke.unclipped : null;
       let called = false;
       const call = (s: TegakiStrokePaintContext) => {
         called = true;
         inner(s);
       };
       stroke.ctx.save();
+      layer?.save();
       try {
         plugin.paint!(stroke, call);
       } catch (error) {
         onError(plugin, 'paint', error);
         if (!called) inner(stroke);
       }
+      layer?.restore();
       stroke.ctx.restore();
     };
   }

@@ -256,6 +256,8 @@ export class TegakiEngine {
   private _maskKey: unknown[] | null = null;
   /** A copy of the finished ink, for the plugins' `ink` hooks. */
   private _inkCanvas: HTMLCanvasElement | null = null;
+  /** Ink clip-to-text leaves alone (the paint context's `unclipped`), laid under the clipped ink. */
+  private _unclippedCanvas: HTMLCanvasElement | null = null;
   /**
    * Glyph outlines for the clip mask, by path data — and, when an `outline`
    * hook reshapes them, by glyph seed and place — for the shaper, plugins and
@@ -950,6 +952,7 @@ export class TegakiEngine {
     this._maskKey = null;
     this._inkCanvas = null;
     this._underlayCanvas = null;
+    this._unclippedCanvas = null;
     this._placed = null;
     this._allPluginsCache = null;
     this._pluginBoundsCache = null;
@@ -2092,6 +2095,22 @@ export class TegakiEngine {
     // stroke before the pen gets to it, so with one the ink may be anywhere a
     // stroke is; the built-in effects paint only what's drawn.
     const paintsAhead = this._plugins.some((p) => p.paint);
+    // With clip-to-text, a layer the mask doesn't cut, for plugins to paint on
+    // (the paint context's `unclipped`); without it, the canvas itself.
+    let unclipped = ctx;
+    if (clipText && paintsAhead) {
+      if (!this._unclippedCanvas) this._unclippedCanvas = document.createElement('canvas');
+      const layer = this._unclippedCanvas;
+      if (layer.width !== canvas.width || layer.height !== canvas.height) {
+        layer.width = canvas.width;
+        layer.height = canvas.height;
+      }
+      const lctx = layer.getContext('2d')!;
+      lctx.setTransform(1, 0, 0, 1, 0, 0);
+      lctx.clearRect(0, 0, layer.width, layer.height);
+      lctx.setTransform(ctx.getTransform());
+      unclipped = lctx;
+    }
     const textBox = this._textBox(layout, fontSize, lineHeight);
     // Clipped ink glows as a whole (the glow plugin's `ink`), fallback text with it.
     const fallbackEffects = clipText ? this._resolvedEffects.filter((e) => e.effect !== 'glow') : this._resolvedEffects;
@@ -2120,7 +2139,7 @@ export class TegakiEngine {
         while (si < strokes.length && strokes[si]!.entryIndex < ei) si++;
         for (; si < strokes.length && strokes[si]!.entryIndex === ei; si++) {
           const stroke = strokes[si]!;
-          paint({ ctx, stroke, style: color, lineCap: font.lineCap, color, fontSize, scale, textBox, frame, random });
+          paint({ ctx, unclipped, stroke, style: color, lineCap: font.lineCap, color, fontSize, scale, textBox, frame, random });
           if (stroke.state !== 'pending' || paintsAhead) inkBoxes.push(this._inkBox(stroke));
         }
       } else if (currentTime >= entry.offset + entry.duration) {
@@ -2272,6 +2291,15 @@ export class TegakiEngine {
           ctx.restore();
         }
       }
+    }
+
+    // The ink the mask leaves alone, under the clipped ink: part of the ink the `ink` hooks see.
+    if (unclipped !== ctx) {
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = 'destination-over';
+      ctx.drawImage(unclipped.canvas, 0, 0);
+      ctx.restore();
     }
 
     // --- Plugins: the finished ink (the built-in glow), then underlays, overlays, onFrame ---

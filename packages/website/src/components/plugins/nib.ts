@@ -61,13 +61,15 @@ export function broadNib(path: StrokePath, o: { angle: number; contrast: number;
  * A broad-edged pen, as in calligraphy: the ink is widest where the stroke
  * runs across the nib's edge and a hairline where it runs along it, so the
  * same letters take on thick and thin by their direction alone. A `geometry`
- * plugin — it only changes widths, once per layout.
+ * plugin — it only changes widths, once per layout — with a one-line `paint`
+ * that puts the ink on the `unclipped` layer, so clip-to-text doesn't trim
+ * the full width back to the font's letters.
  */
 export const nibPlugin = createPlugin({
   name: 'nib',
   label: 'Broad nib',
   description:
-    'A calligraphy pen: thick and thin by the way each stroke runs. geometry — turn Clip to text off (Style → Rendering) to see the full width.',
+    'A calligraphy pen: thick and thin by the way each stroke runs, its full width even with Clip to text on. geometry + paint (unclipped).',
   params: {
     angle: {
       type: 'number',
@@ -94,5 +96,8 @@ export const nibPlugin = createPlugin({
     Uncial: { angle: 20, contrast: 0.7, weight: 2 },
     Marker: { angle: 30, contrast: 0.4, weight: 1.2 },
   },
-  setup: (options) => ({ geometry: (path) => broadNib(path, options) }),
+  setup: (options) => ({
+    geometry: (path) => broadNib(path, options),
+    paint: (s, next) => next({ ...s, ctx: s.unclipped }),
+  }),
 });

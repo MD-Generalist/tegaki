@@ -27,15 +27,14 @@ export function echoPasses(o: { lead: string; follow: string; second: boolean; s
  * Several strokes over the same path, one after another: a wide pass leads,
  * a narrower one follows, and the ink comes last, each a beat behind the one
  * before and all finishing together. A `paint` plugin: it calls `next` once
- * per pass with its own path, color and progress. With clip-to-text on the
- * passes are clipped to the letters, so they show as color running ahead of
- * the ink.
+ * per pass with its own path, color and progress. The passes go on the
+ * paint context's `unclipped` layer, so with clip-to-text on they still show
+ * around the letters, under the clipped ink.
  */
 export const echoPlugin = createPlugin({
   name: 'echo',
   label: 'Echo',
-  description:
-    'Strokes over each path, one a beat behind the other. paint — turn Clip to text off (Style → Rendering) to see the passes around the ink, not just ahead of it.',
+  description: 'Strokes over each path, one a beat behind the other, around the letters even with Clip to text on. paint (unclipped).',
   params: {
     lead: { type: 'color', label: 'Lead', default: '#ffd166' },
     second: { type: 'boolean', label: 'Second pass', default: true },
@@ -74,16 +73,18 @@ export const echoPlugin = createPlugin({
           paths = passes.map(({ width }) => path.map((p) => ({ ...p, width: p.width * width })));
           widened.set(path, paths);
         }
-        // The passes go under the ink already on the canvas — this stroke's
-        // wide passes mustn't cover the strokes it crosses — narrowest first,
-        // so each wider one slides in beneath it.
-        s.ctx.save();
-        s.ctx.globalCompositeOperation = 'destination-over';
+        // The passes go past the letters' edges, so on the layer clip-to-text
+        // leaves alone (under the clipped ink), and under the ink already on
+        // it — this stroke's wide passes mustn't cover the strokes it crosses
+        // — narrowest first, so each wider one slides in beneath it.
+        const under = s.unclipped;
+        under.save();
+        under.globalCompositeOperation = 'destination-over';
         for (let i = passes.length - 1; i >= 0; i--) {
           const p = lagged(progress, passes[i]!.lag);
-          if (p > 0) next({ ...s, style: passes[i]!.color, stroke: { ...s.stroke, path: paths[i]!, progress: p, nibs: [] } });
+          if (p > 0) next({ ...s, ctx: under, style: passes[i]!.color, stroke: { ...s.stroke, path: paths[i]!, progress: p, nibs: [] } });
         }
-        s.ctx.restore();
+        under.restore();
         const ink = lagged(progress, options.lag);
         if (ink > 0) next({ ...s, stroke: { ...s.stroke, progress: ink } });
       },

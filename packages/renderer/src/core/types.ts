@@ -225,6 +225,15 @@ export interface TegakiPluginSteps {
 
 /** A stroke a `paint` hook paints, and how the next hook will paint it. */
 export interface TegakiStrokePaintContext extends StrokePaint, TegakiPluginContext {
+  /**
+   * A canvas clip-to-text doesn't cut, in the same px as `ctx`: pass a
+   * stroke on with `ctx: unclipped` to paint it past the letters' edges (a
+   * wide brush, a pass around the ink), or draw on it directly (flecks and
+   * drops off the line). It's laid under the clipped ink once the mask is
+   * on, before the `ink` hooks, so they see it as ink. Without clip-to-text
+   * it's `ctx` itself.
+   */
+  unclipped: CanvasRenderingContext2D;
   /** The box the text's lines fill, in the same px as the stroke's path. */
   textBox: Box;
   /**

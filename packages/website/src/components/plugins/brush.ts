@@ -82,13 +82,15 @@ export function splashes(path: StrokePath, amount: number, random: () => number)
  * still apply. `size` and `press` make it a great brush, the kind the
  * ancient scrolls were written with: a `geometry` hook widens each stroke,
  * pressed down fat at its start and lifting to a point, and `splatter`
- * flings drops of ink where the brush lands and leaves.
+ * flings drops of ink where the brush lands and leaves. A widened brush and
+ * its drops paint on the `unclipped` layer, so clip-to-text doesn't cut them
+ * back to the font's letters; at its own size the hairs stay inside them.
  */
 export const brushPlugin = createPlugin({
   name: 'brush',
   label: 'Brush',
   description:
-    'A bristly ink brush whose hairs run dry toward the end of each stroke; a great scroll brush when Size is up. paint + geometry — turn Clip to text off (Style → Rendering) for the full width.',
+    'A bristly ink brush whose hairs run dry toward the end of each stroke; a great scroll brush when Size is up, painted past the letters even with Clip to text on. paint + geometry.',
   params: {
     bristles: { type: 'number', label: 'Bristles', default: 9, min: 3, max: 40, step: 1 },
     dryness: { type: 'number', label: 'Dryness', description: 'How soon the hairs run dry.', default: 0.5, min: 0, max: 1, step: 0.05 },
@@ -161,7 +163,9 @@ export const brushPlugin = createPlugin({
               ? path.map((p) => ({ ...p, width: p.width * size }))
               : path.map((p) => ({ ...p, width: p.width * brushWidth(p.t, size, press) }))
         : undefined,
-      paint(s, next) {
+      paint(input, next) {
+        // A widened brush paints past the letters' edges, where clip-to-text doesn't reach.
+        const s = sized ? { ...input, ctx: input.unclipped } : input;
         // A dot is a single dab.
         if (s.stroke.path.points.length < 2) return next(s);
         const { core, hairs } = brushOf(s);
@@ -179,7 +183,11 @@ export const brushPlugin = createPlugin({
         }
         for (const d of list) {
           if (progress < d.t) continue;
-          next({ ...s, stroke: { ...s.stroke, path: new StrokePath([{ x: d.x, y: d.y, width: d.r * 2, t: 0 }]), progress: 1, nibs: [] } });
+          next({
+            ...s,
+            ctx: s.unclipped,
+            stroke: { ...s.stroke, state: 'done', path: new StrokePath([{ x: d.x, y: d.y, width: d.r * 2, t: 0 }]), progress: 1, nibs: [] },
+          });
         }
       },
     };
