@@ -3,6 +3,7 @@ import type { ResolvedEffect } from '../lib/effects.ts';
 import { placementsToSvg, type SvgExportConfig } from '../lib/svgExport.ts';
 import type { LineCap, TegakiGlyphData } from '../types.ts';
 import { drawGlyph } from './drawGlyph.ts';
+import type { TegakiPlugin } from './types.ts';
 
 // A bent stroke of three segments whose width varies, so pressure draws it segment by segment.
 const glyph: TegakiGlyphData = {
@@ -100,5 +101,47 @@ describe('placementsToSvg per-segment caps', () => {
     const svg = placementsToSvg(items, { ...cfg, lineCap: 'round' });
     expect(svg).not.toContain('stroke-linecap="butt"');
     expect(svg).not.toContain('<circle ');
+  });
+});
+
+describe('paintAll', () => {
+  const states = (plugin: Partial<TegakiPlugin>) => {
+    const seen: string[] = [];
+    const rec = recordingContext();
+    drawGlyph(rec.ctx, glyph, pos, -1, 'round', '#000', [], 0, undefined, linear, 1, undefined, undefined, 1, [
+      {
+        name: 'probe',
+        ...plugin,
+        paint: (s, next) => {
+          seen.push(s.stroke.state);
+          next(s);
+        },
+      } as TegakiPlugin,
+    ]);
+    return { seen, caps: rec.caps };
+  };
+
+  test('paint only sees strokes the pen has reached, unless a plugin asks for them all', () => {
+    expect(states({}).seen).toEqual([]);
+    expect(states({ paintAll: true }).seen).toEqual(['pending']);
+  });
+
+  test('a pending stroke passed on unchanged still paints nothing', () => {
+    expect(states({ paintAll: true }).caps).toEqual([]);
+  });
+
+  test('paint is handed the frame, every stroke in it', () => {
+    let count = -1;
+    const rec = recordingContext();
+    drawGlyph(rec.ctx, glyph, pos, 0.5, 'round', '#000', [], 0, undefined, linear, 1, undefined, undefined, 1, [
+      {
+        name: 'probe',
+        paint: (s, next) => {
+          count = s.frame.strokes.length;
+          next(s);
+        },
+      },
+    ]);
+    expect(count).toBe(1);
   });
 });

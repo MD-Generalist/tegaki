@@ -132,3 +132,72 @@ export const soundPlugin = createPlugin({
     };
   },
 });
+
+/** A burst of noise `seconds` long, made once per audio context and reused. */
+const bursts = new WeakMap<AudioContext, AudioBuffer>();
+function burst(audio: AudioContext): AudioBuffer {
+  let buffer = bursts.get(audio);
+  if (!buffer) {
+    buffer = audio.createBuffer(1, Math.round(audio.sampleRate * 0.06), audio.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    bursts.set(audio, buffer);
+  }
+  return buffer;
+}
+
+/** The shared audio context, running — or `null` where there's no Web Audio. */
+function audioNow(): AudioContext | null {
+  const v = voice();
+  if (!v) return null;
+  if (v.audio.state === 'suspended') void v.audio.resume().catch(() => {});
+  return v.audio;
+}
+
+/** A typewriter key striking: a bright click over a low thunk. Each is its own nodes, so fast typing overlaps. */
+export function clack(volume: number): void {
+  const audio = audioNow();
+  if (!audio || volume <= 0) return;
+  const now = audio.currentTime;
+  const click = audio.createBufferSource();
+  click.buffer = burst(audio);
+  click.playbackRate.value = 0.8 + Math.random() * 0.4;
+  const high = audio.createBiquadFilter();
+  high.type = 'highpass';
+  high.frequency.value = 1800;
+  const clickGain = audio.createGain();
+  clickGain.gain.setValueAtTime(0.7 * volume, now);
+  clickGain.gain.exponentialRampToValueAtTime(0.001, now + 0.035);
+  click.connect(high).connect(clickGain).connect(audio.destination);
+  click.start(now);
+  const thunk = audio.createOscillator();
+  thunk.frequency.setValueAtTime(170, now);
+  thunk.frequency.exponentialRampToValueAtTime(70, now + 0.06);
+  const thunkGain = audio.createGain();
+  thunkGain.gain.setValueAtTime(0.45 * volume, now);
+  thunkGain.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
+  thunk.connect(thunkGain).connect(audio.destination);
+  thunk.start(now);
+  thunk.stop(now + 0.08);
+}
+
+/** A typewriter's bell, as the carriage reaches the end. */
+export function ding(volume: number): void {
+  const audio = audioNow();
+  if (!audio || volume <= 0) return;
+  const now = audio.currentTime;
+  for (const [f, level] of [
+    [2093, 0.3],
+    [4186, 0.12],
+    [6280, 0.05],
+  ] as const) {
+    const bell = audio.createOscillator();
+    bell.frequency.value = f;
+    const gain = audio.createGain();
+    gain.gain.setValueAtTime(level * volume, now);
+    gain.gain.exponentialRampToValueAtTime(0.0005, now + 1.2);
+    bell.connect(gain).connect(audio.destination);
+    bell.start(now);
+    bell.stop(now + 1.25);
+  }
+}

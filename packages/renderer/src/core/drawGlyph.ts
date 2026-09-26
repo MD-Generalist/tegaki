@@ -2,7 +2,15 @@ import type { ResolvedEffect } from '../lib/effects.ts';
 import { seededRandom } from '../lib/random.ts';
 import type { SubdividedStroke } from '../lib/strokeCache.ts';
 import { defaultStrokeEasing } from '../lib/strokeEffects.ts';
-import { placeStrokes, type StrokeInstance, strokeProgressAt, strokeWindow } from '../lib/strokeTimeline.ts';
+import {
+  type ActiveStroke,
+  placeStrokes,
+  type StrokeFrame,
+  type StrokeInstance,
+  strokeProgressAt,
+  strokeWindow,
+  type TegakiFrame,
+} from '../lib/strokeTimeline.ts';
 import type { TimelineEntry } from '../lib/timeline.ts';
 import type { LineCap, TegakiGlyphData } from '../types.ts';
 import { effectPlugins } from './effectPlugins.ts';
@@ -94,12 +102,21 @@ export function drawGlyph(
     maxX: pos.x + glyph.w * scale,
     maxY: pos.y + (pos.ascender - pos.descender) * scale,
   };
-  for (const stroke of placed) {
+  const strokes: StrokeFrame[] = placed.map((stroke) => {
     const sample = strokeProgressAt(localTime, stroke.start, stroke.duration, strokeEasing ?? linear);
-    if (sample.state === 'pending') continue;
+    return { ...stroke, ...sample, head: sample.state === 'pending' ? null : stroke.path.pointAt(sample.progress) };
+  });
+  const frame: TegakiFrame = {
+    time: localTime,
+    strokes,
+    active: strokes.filter((s): s is ActiveStroke => s.state === 'drawing' && s.head !== null),
+  };
+  const paintAll = all.some((p) => p.paint && p.paintAll);
+  for (const stroke of strokes) {
+    if (stroke.state === 'pending' && !paintAll) continue;
     paint({
       ctx,
-      stroke: { ...stroke, ...sample, head: stroke.path.pointAt(sample.progress) },
+      stroke,
       style: strokeStyleOverride ?? color,
       lineCap,
       color,
@@ -107,6 +124,7 @@ export function drawGlyph(
       scale,
       textBox,
       time: localTime,
+      frame,
       random,
     });
   }

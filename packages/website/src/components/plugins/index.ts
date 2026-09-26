@@ -16,7 +16,9 @@ import { ballpointPlugin } from './ballpoint.ts';
 import { bleedPlugin } from './bleed.ts';
 import { brushPlugin } from './brush.ts';
 import { colorsPlugin } from './colors.ts';
+import { crtPlugin } from './crt.ts';
 import { echoPlugin } from './echo.ts';
+import { eraserPlugin } from './eraser.ts';
 import { grainPlugin } from './grain.ts';
 import { graphitePlugin } from './graphite.ts';
 import { hapticsPlugin } from './haptics.ts';
@@ -27,11 +29,13 @@ import { nibPlugin } from './nib.ts';
 import { paperPlugin } from './paper.ts';
 import { penPlugin } from './pen.ts';
 import { shadowPlugin } from './shadow.ts';
+import { shakePlugin } from './shake.ts';
 import { shakyPlugin } from './shaky.ts';
 import { slantPlugin } from './slant.ts';
 import { soundPlugin } from './sound.ts';
 import { sparklePlugin } from './sparkle.ts';
 import { strokeOrderPlugin } from './stroke-order.ts';
+import { typewriterPlugin } from './typewriter.ts';
 import { wetPlugin } from './wet.ts';
 
 export interface ShowcasePlugin {
@@ -46,8 +50,10 @@ export interface ShowcasePlugin {
 // first, overlays top-most last; in the paint chain, whoever sets the color
 // before whoever reads it (Colors, then Wet ink), Ballpoint's pieces before
 // Wet ink times them, and the painters that bring their own color (Graphite,
-// Neon, Laser) after Colors; in the ink hooks, the glows and grain before
-// the shadow is cast.
+// Neon, Laser) after Colors, and the ones that decide what shows when
+// (Typewriter, Eraser) ahead of the painters; in the ink hooks, the glows
+// and grain before the shadow is cast, then the cathode tube over all of
+// it, and the screen shake last, moving everything drawn before it.
 export const SHOWCASE_PLUGINS: readonly ShowcasePlugin[] = [
   // Shipped in tegaki/core, not demos.
   { id: 'vary', factory: variationPlugin },
@@ -58,6 +64,8 @@ export const SHOWCASE_PLUGINS: readonly ShowcasePlugin[] = [
   { id: 'paper', factory: paperPlugin },
   { id: 'order', factory: strokeOrderPlugin },
   { id: 'colors', factory: colorsPlugin },
+  { id: 'type', factory: typewriterPlugin },
+  { id: 'erase', factory: eraserPlugin },
   { id: 'ball', factory: ballpointPlugin },
   { id: 'graphite', factory: graphitePlugin },
   { id: 'wet', factory: wetPlugin },
@@ -68,6 +76,8 @@ export const SHOWCASE_PLUGINS: readonly ShowcasePlugin[] = [
   { id: 'grain', factory: grainPlugin },
   { id: 'bleed', factory: bleedPlugin },
   { id: 'shadow', factory: shadowPlugin },
+  { id: 'crt', factory: crtPlugin },
+  { id: 'shake', factory: shakePlugin },
   { id: 'sparkle', factory: sparklePlugin },
   { id: 'karaoke', factory: karaokePlugin },
   { id: 'pen', factory: penPlugin },

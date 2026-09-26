@@ -1921,6 +1921,7 @@ export class TegakiEngine {
     scale: number,
     color: string,
     bounds: Box | null,
+    frame: TegakiFrame,
   ): void {
     const canvas = this._canvasEl;
     if (!this._inkCanvas) this._inkCanvas = document.createElement('canvas');
@@ -1933,7 +1934,17 @@ export class TegakiEngine {
     inkCtx.globalCompositeOperation = 'copy';
     inkCtx.drawImage(canvas, 0, 0);
     const steps = this._steps.steps;
-    const context = { ctx, ink, bounds, fontSize, scale, color, random: (key: string | number) => seededRandom(this._seed, key), step: 0 };
+    const context = {
+      ctx,
+      ink,
+      bounds,
+      fontSize,
+      scale,
+      color,
+      frame,
+      random: (key: string | number) => seededRandom(this._seed, key),
+      step: 0,
+    };
     for (const plugin of plugins) {
       if (!plugin.ink) continue;
       context.step = steps.get(plugin) ?? 0;
@@ -2077,6 +2088,8 @@ export class TegakiEngine {
     const frame = sampleFrame(this._placedStrokes(), currentTime, this._timing);
     const strokes = frame.strokes;
     const paint = paintWith(plugins, this._reportPluginError, undefined, this._steps.steps);
+    // A plugin that paints strokes before the pen gets to them sees them all.
+    const paintAll = plugins.some((p) => p.paint && p.paintAll);
     const textBox = this._textBox(layout, fontSize, lineHeight);
     // Clipped ink glows as a whole (the glow plugin's `ink`), fallback text with it.
     const fallbackEffects = clipText ? this._resolvedEffects.filter((e) => e.effect !== 'glow') : this._resolvedEffects;
@@ -2105,8 +2118,8 @@ export class TegakiEngine {
         while (si < strokes.length && strokes[si]!.entryIndex < ei) si++;
         for (; si < strokes.length && strokes[si]!.entryIndex === ei; si++) {
           const stroke = strokes[si]!;
-          if (stroke.state === 'pending') continue;
-          paint({ ctx, stroke, style: color, lineCap: font.lineCap, color, fontSize, scale, textBox, time: currentTime, random });
+          if (stroke.state === 'pending' && !paintAll) continue;
+          paint({ ctx, stroke, style: color, lineCap: font.lineCap, color, fontSize, scale, textBox, time: currentTime, frame, random });
           inkBoxes.push(this._inkBox(stroke));
         }
       } else if (currentTime >= entry.offset + entry.duration) {
@@ -2261,7 +2274,7 @@ export class TegakiEngine {
     }
 
     // --- Plugins: the finished ink (the built-in glow), then underlays, overlays, onFrame ---
-    if (plugins.some((p) => p.ink)) this._renderInk(ctx, plugins, fontSize, scale, color, drawn);
+    if (plugins.some((p) => p.ink)) this._renderInk(ctx, plugins, fontSize, scale, color, drawn, frame);
     if (plugins.some((p) => p.underlay || p.overlay || p.onFrame)) this._renderPlugins(ctx, plugins, frame, fontSize, color);
   }
 }

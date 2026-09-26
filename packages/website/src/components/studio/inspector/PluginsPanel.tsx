@@ -64,8 +64,8 @@ export function PluginsPanel({ settings, set }: { settings: UrlState; set: SetSe
         ))}
       </DialScope>
       <Hint>
-        Stroke order, Brush (try its Scroll preset) and Practice paper's 田字格 / 米字格 suit kanji best — try Klee One with 永 or 書. Neon
-        and Laser shine on the dark theme. Sound starts once you've clicked on the page; Haptics buzz on Android phones.
+        Stroke order, Brush (try its Scroll preset) and Practice paper's 田字格 / 米字格 suit kanji best — try Klee One with 永 or 書. Neon,
+        Laser and Cathode tube shine on the dark theme. Sound starts once you've clicked on the page; Haptics buzz on Android phones.
       </Hint>
     </Section>
   );

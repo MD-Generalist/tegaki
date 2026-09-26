@@ -5,7 +5,9 @@ import { skipPieces } from './ballpoint.ts';
 import { bristles, brushWidth, splashes } from './brush.ts';
 import { mix, parseCanvasColor } from './color.ts';
 import { colorIndex, PALETTES, pickColor } from './colors.ts';
+import { dimAt, tearsAt } from './crt.ts';
 import { echoPasses, echoPlugin, lagged } from './echo.ts';
+import { crumbs, erasingAt, isErased } from './eraser.ts';
 import { graphiteGray, smudges, splinters } from './graphite.ts';
 import { hapticFor } from './haptics.ts';
 import { createShowcasePlugins, normalizePluginOptions, SHOWCASE_PLUGINS } from './index.ts';
@@ -16,11 +18,13 @@ import { broadNib, nibFactor } from './nib.ts';
 import { grainTile } from './noise.ts';
 import { paperBounds, paperLayout } from './paper.ts';
 import { penPoses } from './pen.ts';
+import { shakeAt, shakeStrength } from './shake.ts';
 import { tremorAt, tremorWaves } from './shaky.ts';
 import { leanAbout } from './slant.ts';
 import { penMotion } from './sound.ts';
 import { sparkleAt, strokeSparkles } from './sparkle.ts';
 import { layoutGuides } from './stroke-order.ts';
+import { punch, strikeOf, typedGlyphs } from './typewriter.ts';
 import { dryness, inkAge, poolFactors } from './wet.ts';
 
 /** A straight stroke from (x0, y) to (x1, y), `width` px wide. */
@@ -470,5 +474,101 @@ describe('haptics', () => {
     expect(hapticFor({ distance: 5, touches: 0 }, { tap: 14, buzz: true }, 1)).toBe(6);
     expect(hapticFor({ distance: 5, touches: 0 }, { tap: 14, buzz: true }, 0.01)).toBeNull();
     expect(hapticFor(null, { tap: 14, buzz: true }, 1)).toBeNull();
+  });
+});
+
+describe('eraser', () => {
+  const stroke = { start: 1, duration: 1 };
+
+  test('erasing from written, the last stroke first, runs back along the stroke', () => {
+    // total 4: this stroke ends at 2, so it's erased from 2 to 3.
+    expect(erasingAt(stroke, 1.5, 4, 'erase', 'reverse')).toMatchObject({ from: 0, to: 1, eraser: null });
+    const mid = erasingAt(stroke, 2.5, 4, 'erase', 'reverse');
+    expect(mid.to).toBeCloseTo(0.5);
+    expect(mid.eraser).toBeCloseTo(0.5);
+    expect(erasingAt(stroke, 3.5, 4, 'erase', 'reverse').to).toBe(0);
+  });
+
+  test('erasing as written runs along each stroke from its start', () => {
+    const mid = erasingAt(stroke, 1.5, 4, 'erase', 'same');
+    expect(mid.from).toBeCloseTo(0.5);
+    expect(mid.to).toBe(1);
+  });
+
+  test('write, then erase: written in the first half, erased in the second', () => {
+    expect(erasingAt(stroke, 0.75, 4, 'write-erase', 'same')).toMatchObject({ written: 0.5, erased: 0 });
+    expect(erasingAt(stroke, 1.5, 4, 'write-erase', 'same')).toMatchObject({ written: 1, erased: 0 });
+    expect(erasingAt(stroke, 2.75, 4, 'write-erase', 'same')).toMatchObject({ written: 1, erased: 0.5 });
+  });
+
+  test('crumbs show where the eraser has been', () => {
+    const e = erasingAt(stroke, 2.5, 4, 'erase', 'reverse');
+    expect(isErased(e, 0.8, 'reverse')).toBe(true);
+    expect(isErased(e, 0.2, 'reverse')).toBe(false);
+    expect(crumbs(line(0, 200, 0), 100, 1, lcg()).length).toBe(8);
+  });
+});
+
+describe('typewriter', () => {
+  test('each glyph strikes its own way, the same every time', () => {
+    expect(strikeOf(4, 1, 1)).toEqual(strikeOf(4, 1, 1));
+    expect(strikeOf(4, 1, 1)).not.toEqual(strikeOf(5, 1, 1));
+    const true_ = strikeOf(4, 0, 0);
+    expect(true_.ink).toBe(1);
+    expect(Math.abs(true_.dx) + Math.abs(true_.dy) + Math.abs(true_.turn)).toBe(0);
+  });
+
+  test('a strike snaps in and settles', () => {
+    expect(punch(-0.1, 1)).toBe(0);
+    expect(punch(0, 1)).toBe(1);
+    expect(Math.abs(punch(0.3, 1))).toBeLessThan(0.001);
+  });
+
+  test('glyphs are typed in the order their slots come, once each, ending where their advance does', () => {
+    const at = (entryIndex: number, offset: number, x: number) =>
+      ({ entryIndex, entry: { offset }, place: { x, y: 0, scale: 0.1, ascender: 800 }, glyph: { w: 500 } }) as unknown as StrokeFrame;
+    const typed = typedGlyphs([at(1, 0.5, 50), at(0, 0, 0), at(1, 0.5, 50)]);
+    expect(typed.map((g) => g.entryIndex)).toEqual([0, 1]);
+    expect(typed[1]!.end).toEqual({ x: 100, y: 80 });
+  });
+});
+
+describe('cathode tube', () => {
+  test('tears come now and then with a bad signal, never with a good one', () => {
+    expect(Array.from({ length: 100 }, (_, s) => tearsAt(0, s, 0)).flat()).toEqual([]);
+    const torn = Array.from({ length: 100 }, (_, s) => tearsAt(0, s, 1)).filter((t) => t.length > 0).length;
+    expect(torn).toBeGreaterThan(15);
+    expect(torn).toBeLessThan(60);
+  });
+
+  test('the flicker is steady for a step, and none without flicker', () => {
+    expect(dimAt(0, 7, 0.5)).toBe(dimAt(0, 7, 0.5));
+    expect(dimAt(0, 7, 0)).toBe(0);
+  });
+});
+
+describe('screen shake', () => {
+  const o = { trigger: 'strokes' as const, amount: 0.05, decay: 0.1, rotation: 1, speed: 10 };
+  const shaking = (time: number, strokes: StrokeFrame[]) => frame(time, strokes);
+
+  test('a stroke landing jolts it, dying away', () => {
+    const s = (t: number) => shaking(t, [stroke('0', line(0, 100, 0), 'drawing', 0.5, 1), stroke('1', line(0, 100, 0), 'pending', 0, 5)]);
+    expect(shakeStrength(s(1), o)).toBe(1);
+    expect(shakeStrength(s(1.2), o)).toBeLessThan(0.2);
+    expect(shakeStrength(s(0.5), o)).toBe(0);
+  });
+
+  test('it comes to rest once the text is written, and shakes the same at the same time', () => {
+    const done = shaking(3, [stroke('0', line(0, 100, 0), 'done', 1, 2.99)]);
+    expect(shakeAt(done, o)).toEqual({ dx: 0, dy: 0, turn: 0 });
+    const live = shaking(1.01, [stroke('0', line(0, 100, 0), 'drawing', 0.5, 1)]);
+    expect(shakeAt(live, o)).toEqual(shakeAt(live, o));
+    expect(Math.abs(shakeAt(live, o).dx)).toBeLessThanOrEqual(0.05);
+  });
+
+  test('a rumble while writing, whatever the strokes did', () => {
+    const live = shaking(4, [stroke('0', line(0, 100, 0), 'drawing', 0.5, 1)]);
+    expect(shakeStrength(live, { ...o, trigger: 'writing' })).toBeCloseTo(0.45);
+    expect(shakeStrength(live, o)).toBe(0);
   });
 });

@@ -129,7 +129,7 @@ export const ballpointPlugin = createPlugin({
             },
           });
         }
-        if (blob) next({ ...s, stroke: { ...stroke, path: blob, progress: 1, nibs: [] } });
+        if (blob && stroke.state !== 'pending') next({ ...s, stroke: { ...stroke, path: blob, progress: 1, nibs: [] } });
       },
     };
   },

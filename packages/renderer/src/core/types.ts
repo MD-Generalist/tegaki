@@ -229,6 +229,8 @@ export interface TegakiStrokePaintContext extends StrokePaint, TegakiPluginConte
   textBox: Box;
   /** Timeline seconds of the frame being drawn — with the stroke's `start` and `duration`, how long ago the pen passed a point. */
   time: number;
+  /** The frame being drawn: every stroke, drawn or not — the rest of the glyph, the whole timeline's length. */
+  frame: TegakiFrame;
   /** px per font unit. */
   scale: number;
 }
@@ -248,6 +250,8 @@ export interface TegakiInkContext extends TegakiPluginContext {
   bounds: Box | null;
   /** px per font unit. */
   scale: number;
+  /** The frame the ink is of: when each stroke was drawn, where the pens are. */
+  frame: TegakiFrame;
 }
 
 /** What a plugin sizes its {@link TegakiPlugin.bounds} from. */
@@ -291,6 +295,15 @@ export interface TegakiPlugin {
    * call it more than once, draw around it, or don't call it at all.
    */
   paint?(stroke: TegakiStrokePaintContext, next: (stroke: TegakiStrokePaintContext) => void): void;
+  /**
+   * Hand `paint` the strokes the pen hasn't reached yet too (their `state`
+   * is `'pending'`), not only the ones drawn or being drawn — for a plugin
+   * that decides for itself what shows when: a typewriter stamping a whole
+   * glyph at once, an eraser starting from the text written out. Every
+   * `paint` hook in the chain then gets them; the default painter skips
+   * pending strokes, so a stroke passed on unchanged still doesn't show.
+   */
+  paintAll?: boolean;
   /** Post-process the finished ink every frame, before `underlay` and `overlay`: a glow, a shadow, a filter. */
   ink?(ink: TegakiInkContext): void;
   /** Paint under the ink. Clip-to-text doesn't clip it. */
