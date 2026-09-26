@@ -76,16 +76,15 @@ const WHITE: Rgba = [255, 255, 255, 1];
  * An eraser rubbing the text out: stroke by stroke, a rubber block scrubs
  * along the ink, leaving a faint ghost of it and crumbs of rubber. It can
  * erase the text from written, or write it and then erase it in one
- * timeline — the last stroke first (an undo), or in writing order. `paint`
- * with `paintAll`: it paints each stroke's stretch still on the paper,
- * whether or not the pen has reached it, from the time and the whole
- * timeline's length (`frame`); the eraser and crumbs are an `overlay`.
+ * timeline — the last stroke first (an undo), or in writing order. `paint`,
+ * which sees every stroke whether or not the pen has reached it, paints
+ * each one's stretch still on the paper, from the frame's time and the
+ * whole timeline's length; the eraser and crumbs are an `overlay`.
  */
 export const eraserPlugin = createPlugin({
   name: 'eraser',
   label: 'Eraser',
-  description:
-    'An eraser rubs the text out stroke by stroke, leaving a ghost and crumbs — or writes it, then erases it. paint (paintAll) + overlay.',
+  description: 'An eraser rubs the text out stroke by stroke, leaving a ghost and crumbs — or writes it, then erases it. paint + overlay.',
   params: {
     mode: {
       type: 'select',
@@ -135,10 +134,10 @@ export const eraserPlugin = createPlugin({
     const crumbsOf = new WeakMap<StrokePath, Crumb[]>();
     let ink: { style: string; ghost: string | null } | null = null;
     return {
-      paintAll: true,
       bounds: ({ strokes, fontSize }) => expandBox(unionBoxes(strokes.map((s) => s.path.bounds())), fontSize * (tool ? 0.7 : 0.15)),
       paint(s, next) {
-        const { stroke, frame, time } = s;
+        const { stroke, frame } = s;
+        const { time } = frame;
         const e = erasingAt(stroke, time, totalOf(frame), mode, order);
         const whole = e.from <= 0 && e.to >= 1;
         if (ghost > 0 && e.erased > 0 && typeof s.style === 'string' && stroke.path.points.length > 1) {

@@ -158,7 +158,6 @@ describe('steps that only paint', () => {
       fontSize: 10,
       scale: 1,
       textBox: { minX: 0, minY: 0, maxX: 1, maxY: 1 },
-      time: 0,
       frame: { time: 0, strokes: [], active: [] },
       random: () => Math.random,
     });

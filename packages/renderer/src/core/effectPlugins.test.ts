@@ -143,7 +143,6 @@ describe('paint plugins', () => {
       fontSize: 100,
       scale: 1,
       textBox: { minX: 0, minY: 0, maxX: 100, maxY: 20 },
-      time: 1,
       frame: { time: 1, strokes: [frame], active: [] },
       random: (k) => seededRandom(0, k),
     });
@@ -243,7 +242,6 @@ describe('glow per stroke', () => {
       fontSize: 100,
       scale: 1,
       textBox: { minX: 0, minY: 0, maxX: 100, maxY: 20 },
-      time: 1,
       frame: { time: 1, strokes: [frame], active: [] },
       random: (k) => seededRandom(0, k),
     });

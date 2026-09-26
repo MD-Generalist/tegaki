@@ -59,7 +59,7 @@ export function poolFactors(points: readonly PathPoint[], pool: number): number[
  * light along it — and dries lighter over a second or so, so the pen leaves
  * a trail of drying ink behind it. A `paint` plugin: it paints the stroke
  * in a color that changes along it with the time since the pen passed each
- * point (`time` against the stroke's `start` and `duration`), then the
+ * point (the frame's `time` against the stroke's `start` and `duration`), then the
  * sheen over the part still wet. Dry ink is mixed toward white, so it's
  * lighter on light paper. With `pool`, a `geometry` hook swells the ink
  * where the pen slows — touching down, lifting off, turning sharply.
@@ -107,7 +107,10 @@ export const wetPlugin = createPlugin({
         return path.map((p) => ({ ...p, width: p.width * factors[i++]! }));
       },
       paint(s, next) {
-        const { stroke, time } = s;
+        // Not drawn yet: pass it on, and the default painter shows nothing.
+        if (s.stroke.state === 'pending') return next(s);
+        const { stroke } = s;
+        const { time } = s.frame;
         const ink = typeof s.style === 'string' ? canvasColor(s.ctx, s.style) : null;
         // A gradient or a pattern: nothing to dry.
         if (!ink) return next(s);

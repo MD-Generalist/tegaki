@@ -227,9 +227,11 @@ export interface TegakiPluginSteps {
 export interface TegakiStrokePaintContext extends StrokePaint, TegakiPluginContext {
   /** The box the text's lines fill, in the same px as the stroke's path. */
   textBox: Box;
-  /** Timeline seconds of the frame being drawn — with the stroke's `start` and `duration`, how long ago the pen passed a point. */
-  time: number;
-  /** The frame being drawn: every stroke, drawn or not — the rest of the glyph, the whole timeline's length. */
+  /**
+   * The frame being drawn: its `time` (with the stroke's `start` and
+   * `duration`, how long ago the pen passed a point) and every stroke in it,
+   * drawn or not — the rest of the glyph, the whole timeline's length.
+   */
   frame: TegakiFrame;
   /** px per font unit. */
   scale: number;
@@ -289,21 +291,17 @@ export interface TegakiPlugin {
    */
   outline?(contour: readonly { x: number; y: number }[], ctx: TegakiOutlineContext): { x: number; y: number }[];
   /**
-   * Paint a stroke, every frame it's drawn. `next` paints it the way the rest
-   * of the chain does — the plugins after this one, then the default painter
-   * ({@link paintStroke}). Change what it gets (`style`, the stroke's `path`),
-   * call it more than once, draw around it, or don't call it at all.
+   * Paint a stroke. Called every frame for every stroke, the ones the pen
+   * hasn't reached too (`stroke.state` is `'pending'`), so a plugin can
+   * decide what shows when. `next` paints it the way the rest of the chain
+   * does — the plugins after this one, then the default painter
+   * ({@link paintStroke}), which paints only what's drawn: a pending stroke
+   * passed on unchanged shows nothing. Change what it gets (`style`, the
+   * stroke's `path`, `state` and `progress`), call it more than once, draw
+   * around it, or don't call it at all. Anything drawn directly, rather than
+   * through `next`, should check `stroke.state` first.
    */
   paint?(stroke: TegakiStrokePaintContext, next: (stroke: TegakiStrokePaintContext) => void): void;
-  /**
-   * Hand `paint` the strokes the pen hasn't reached yet too (their `state`
-   * is `'pending'`), not only the ones drawn or being drawn — for a plugin
-   * that decides for itself what shows when: a typewriter stamping a whole
-   * glyph at once, an eraser starting from the text written out. Every
-   * `paint` hook in the chain then gets them; the default painter skips
-   * pending strokes, so a stroke passed on unchanged still doesn't show.
-   */
-  paintAll?: boolean;
   /** Post-process the finished ink every frame, before `underlay` and `overlay`: a glow, a shadow, a filter. */
   ink?(ink: TegakiInkContext): void;
   /** Paint under the ink. Clip-to-text doesn't clip it. */

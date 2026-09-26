@@ -45,7 +45,7 @@ const CHAR: Rgba = [46, 26, 14, 1];
  * white-hot and cooling — to the beam's color for a light show, to char
  * for an engraving. The beam and sparks are an `overlay` (from the frame
  * alone, so scrubbing shows the same sparks); the cooling line is `paint`
- * (from the paint context's `time`); the glow is an `ink` hook; `bounds`
+ * (from the frame's `time`); the glow is an `ink` hook; `bounds`
  * makes room for the emitter.
  */
 export const laserPlugin = createPlugin({
@@ -96,10 +96,13 @@ export const laserPlugin = createPlugin({
         return expandBox(unionBoxes([box, { minX: e.x, minY: e.y, maxX: e.x, maxY: e.y }]), fontSize * 0.25);
       },
       paint(s, next) {
+        // Not drawn yet: pass it on, and the default painter shows nothing.
+        if (s.stroke.state === 'pending') return next(s);
         lit ??= canvasColor(s.ctx, color) ?? [255, 42, 42, 1];
         const beamColor = lit;
         const final = burn ? CHAR : beamColor;
-        const { stroke, time } = s;
+        const { stroke } = s;
+        const { time } = s.frame;
         const age = (t: number) => inkAge(stroke, t, time);
         const allCool = age(stroke.progress) >= cool;
         next({ ...s, style: allCool ? rgba(final) : (t) => rgba(cooled(age(t), cool, beamColor, final)) });

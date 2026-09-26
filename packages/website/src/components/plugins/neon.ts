@@ -108,6 +108,8 @@ export const neonPlugin = createPlugin({
       steps: { count: 600, fps, idle: true },
       bounds: ({ strokes, fontSize }) => expandBox(unionBoxes(strokes.map((st) => st.path.bounds())), fontSize * 0.3 * glow),
       paint(s, next) {
+        // Not drawn yet: pass it on, and the default painter shows nothing.
+        if (s.stroke.state === 'pending') return next(s);
         lit ??= canvasColor(s.ctx, color) ?? [255, 43, 214, 1];
         const { stroke } = s;
         let t = tubes.get(stroke.path);
@@ -118,7 +120,7 @@ export const neonPlugin = createPlugin({
           };
           tubes.set(stroke.path, t);
         }
-        const b = brightness(stroke.seed, s.step, s.time - (stroke.start + stroke.duration), flickers);
+        const b = brightness(stroke.seed, s.step, s.frame.time - (stroke.start + stroke.duration), flickers);
         // Opaque when lit — a stroke of varying width is painted a segment at a time, and see-through segments stack up.
         next({ ...s, style: rgba(mix(OFF, lit, b)), stroke: { ...stroke, path: t.tube } });
         if (b > 0.3) next({ ...s, style: rgba(mix(lit, WHITE, 0.6 * b)), stroke: { ...stroke, path: t.core, nibs: [] } });

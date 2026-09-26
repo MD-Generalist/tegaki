@@ -111,9 +111,7 @@ export function drawGlyph(
     strokes,
     active: strokes.filter((s): s is ActiveStroke => s.state === 'drawing' && s.head !== null),
   };
-  const paintAll = all.some((p) => p.paint && p.paintAll);
   for (const stroke of strokes) {
-    if (stroke.state === 'pending' && !paintAll) continue;
     paint({
       ctx,
       stroke,
@@ -123,7 +121,6 @@ export function drawGlyph(
       fontSize: pos.fontSize,
       scale,
       textBox,
-      time: localTime,
       frame,
       random,
     });

@@ -55,15 +55,14 @@ const WHITE: Rgba = [255, 255, 255, 1];
  * and lighter or darker as the ribbon's ink allows, the same every time for
  * the same letter in the same place. A caret waits after the last glyph,
  * blinking once the typing stops, and each strike can clack (and the bell
- * ring at the end). `paint` with `paintAll`, so it stamps a glyph's strokes
- * before the pen would reach them; the caret is an `overlay` blinking on
+ * ring at the end). `paint`, which sees every stroke, drawn or not, stamps a
+ * glyph's strokes before the pen would reach them; the caret is an `overlay` blinking on
  * `steps`; the sound is `onFrame`. Speed up Motion for brisker typing.
  */
 export const typewriterPlugin = createPlugin({
   name: 'typewriter',
   label: 'Typewriter',
-  description:
-    'Each glyph struck whole in its turn, a little off true, with a blinking caret and a clack. paint (paintAll) + overlay + onFrame.',
+  description: 'Each glyph struck whole in its turn, a little off true, with a blinking caret and a clack. paint + overlay + onFrame.',
   params: {
     misalign: {
       type: 'number',
@@ -139,13 +138,12 @@ export const typewriterPlugin = createPlugin({
     };
     let ink: { style: string; rgb: Rgba | null } | null = null;
     return {
-      paintAll: true,
       // Room for the caret past the last glyph, and a glyph struck off true.
       bounds: ({ strokes, fontSize }) => expandBox(unionBoxes(strokes.map((st) => st.path.bounds())), fontSize * 0.55),
       steps: caret === 'none' ? undefined : { count: 2, fps: 1.6, idle: true },
       paint(s, next) {
-        const { stroke, time, fontSize } = s;
-        const age = time - stroke.entry.offset;
+        const { stroke, fontSize } = s;
+        const age = s.frame.time - stroke.entry.offset;
         // Not struck yet: nothing on the paper.
         if (age < 0) return;
         const st = strikeFor(stroke.seed);

@@ -3,7 +3,6 @@ import type { ResolvedEffect } from '../lib/effects.ts';
 import { placementsToSvg, type SvgExportConfig } from '../lib/svgExport.ts';
 import type { LineCap, TegakiGlyphData } from '../types.ts';
 import { drawGlyph } from './drawGlyph.ts';
-import type { TegakiPlugin } from './types.ts';
 
 // A bent stroke of three segments whose width varies, so pressure draws it segment by segment.
 const glyph: TegakiGlyphData = {
@@ -104,44 +103,36 @@ describe('placementsToSvg per-segment caps', () => {
   });
 });
 
-describe('paintAll', () => {
-  const states = (plugin: Partial<TegakiPlugin>) => {
-    const seen: string[] = [];
+describe('paint sees every stroke', () => {
+  const seen = (time: number) => {
+    const states: string[] = [];
     const rec = recordingContext();
-    drawGlyph(rec.ctx, glyph, pos, -1, 'round', '#000', [], 0, undefined, linear, 1, undefined, undefined, 1, [
-      {
-        name: 'probe',
-        ...plugin,
-        paint: (s, next) => {
-          seen.push(s.stroke.state);
-          next(s);
-        },
-      } as TegakiPlugin,
-    ]);
-    return { seen, caps: rec.caps };
-  };
-
-  test('paint only sees strokes the pen has reached, unless a plugin asks for them all', () => {
-    expect(states({}).seen).toEqual([]);
-    expect(states({ paintAll: true }).seen).toEqual(['pending']);
-  });
-
-  test('a pending stroke passed on unchanged still paints nothing', () => {
-    expect(states({ paintAll: true }).caps).toEqual([]);
-  });
-
-  test('paint is handed the frame, every stroke in it', () => {
-    let count = -1;
-    const rec = recordingContext();
-    drawGlyph(rec.ctx, glyph, pos, 0.5, 'round', '#000', [], 0, undefined, linear, 1, undefined, undefined, 1, [
+    drawGlyph(rec.ctx, glyph, pos, time, 'round', '#000', [], 0, undefined, linear, 1, undefined, undefined, 1, [
       {
         name: 'probe',
         paint: (s, next) => {
-          count = s.frame.strokes.length;
+          states.push(`${s.stroke.state}/${s.frame.strokes.length}`);
           next(s);
         },
       },
     ]);
-    expect(count).toBe(1);
+    return { states, caps: rec.caps };
+  };
+
+  test("the strokes the pen hasn't reached too, with the whole frame", () => {
+    expect(seen(-1).states).toEqual(['pending/1']);
+    expect(seen(0.5).states).toEqual(['drawing/1']);
+  });
+
+  test('a pending stroke passed on unchanged paints nothing', () => {
+    expect(seen(-1).caps).toEqual([]);
+  });
+
+  test('a pending stroke passed on as drawn shows', () => {
+    const rec = recordingContext();
+    drawGlyph(rec.ctx, glyph, pos, -1, 'round', '#000', [], 0, undefined, linear, 1, undefined, undefined, 1, [
+      { name: 'stamp', paint: (s, next) => next({ ...s, stroke: { ...s.stroke, state: 'done', progress: 1 } }) },
+    ]);
+    expect(rec.caps.length).toBeGreaterThan(0);
   });
 });

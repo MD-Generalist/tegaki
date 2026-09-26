@@ -2088,8 +2088,10 @@ export class TegakiEngine {
     const frame = sampleFrame(this._placedStrokes(), currentTime, this._timing);
     const strokes = frame.strokes;
     const paint = paintWith(plugins, this._reportPluginError, undefined, this._steps.steps);
-    // A plugin that paints strokes before the pen gets to them sees them all.
-    const paintAll = plugins.some((p) => p.paint && p.paintAll);
+    // `paint` sees every stroke, drawn or not. A plugin's `paint` may show a
+    // stroke before the pen gets to it, so with one the ink may be anywhere a
+    // stroke is; the built-in effects paint only what's drawn.
+    const paintsAhead = this._plugins.some((p) => p.paint);
     const textBox = this._textBox(layout, fontSize, lineHeight);
     // Clipped ink glows as a whole (the glow plugin's `ink`), fallback text with it.
     const fallbackEffects = clipText ? this._resolvedEffects.filter((e) => e.effect !== 'glow') : this._resolvedEffects;
@@ -2118,9 +2120,8 @@ export class TegakiEngine {
         while (si < strokes.length && strokes[si]!.entryIndex < ei) si++;
         for (; si < strokes.length && strokes[si]!.entryIndex === ei; si++) {
           const stroke = strokes[si]!;
-          if (stroke.state === 'pending' && !paintAll) continue;
-          paint({ ctx, stroke, style: color, lineCap: font.lineCap, color, fontSize, scale, textBox, time: currentTime, frame, random });
-          inkBoxes.push(this._inkBox(stroke));
+          paint({ ctx, stroke, style: color, lineCap: font.lineCap, color, fontSize, scale, textBox, frame, random });
+          if (stroke.state !== 'pending' || paintsAhead) inkBoxes.push(this._inkBox(stroke));
         }
       } else if (currentTime >= entry.offset + entry.duration) {
         const { x, y } = entryOrigin(entry, layout, lineIdx, fontSize, lineHeight, halfLeading);
