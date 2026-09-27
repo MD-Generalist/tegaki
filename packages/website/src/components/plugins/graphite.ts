@@ -161,6 +161,8 @@ export const graphitePlugin = createPlugin({
     return {
       bounds: ({ strokes, fontSize }) => expandBox(unionBoxes(strokes.map((st) => st.path.bounds())), fontSize * 0.15),
       paint(s, next) {
+        // Not drawn yet: pass it on, and the default painter shows nothing.
+        if (s.stroke.state === 'pending') return next(s);
         const { stroke, ctx, fontSize } = s;
         const line = cached(lines, stroke, () => stroke.path.map((p) => ({ ...p, width: p.width * weight })));
         next({ ...s, style: patternFor(ctx, s.random('graphite')), stroke: { ...stroke, path: line } });

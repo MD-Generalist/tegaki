@@ -67,6 +67,8 @@ export const echoPlugin = createPlugin({
     const widened = new WeakMap<StrokePath, StrokePath[]>();
     return {
       paint(s, next) {
+        // Not drawn yet: pass it on, and the default painter shows nothing.
+        if (s.stroke.state === 'pending') return next(s);
         const { path, progress } = s.stroke;
         let paths = widened.get(path);
         if (!paths) {

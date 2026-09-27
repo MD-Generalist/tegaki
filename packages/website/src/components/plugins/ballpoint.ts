@@ -112,6 +112,8 @@ export const ballpointPlugin = createPlugin({
     };
     return {
       paint(s, next) {
+        // Not drawn yet: pass it on, and the default painter shows nothing.
+        if (s.stroke.state === 'pending') return next(s);
         const { stroke } = s;
         const { pieces, blob } = penOf(s);
         for (const { from, to, path } of pieces) {

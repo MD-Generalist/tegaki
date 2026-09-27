@@ -2111,7 +2111,11 @@ export class TegakiEngine {
       widen === 1
         ? paintStroke
         : (s: TegakiStrokePaintContext) =>
-            paintStroke(s.ctx === ctx ? { ...s, stroke: { ...s.stroke, path: this._widened(s.stroke.path, widen) } } : s);
+            paintStroke(
+              s.ctx === ctx && s.stroke.state !== 'pending'
+                ? { ...s, stroke: { ...s.stroke, path: this._widened(s.stroke.path, widen) } }
+                : s,
+            );
     const paint = paintWith(plugins, this._reportPluginError, painter, this._steps.steps);
     // `paint` sees every stroke, drawn or not. A plugin's `paint` may show a
     // stroke before the pen gets to it, so with one the ink may be anywhere a
@@ -2161,6 +2165,8 @@ export class TegakiEngine {
         while (si < strokes.length && strokes[si]!.entryIndex < ei) si++;
         for (; si < strokes.length && strokes[si]!.entryIndex === ei; si++) {
           const stroke = strokes[si]!;
+          // The built-in effects paint only what's drawn: without a plugin's `paint`, a pending stroke has nothing to show.
+          if (stroke.state === 'pending' && !paintsAhead) continue;
           paint({ ctx, unclipped, stroke, style: color, lineCap: font.lineCap, color, fontSize, scale, textBox, frame, random });
           if (stroke.state !== 'pending' || paintsAhead) inkBoxes.push(this._inkBox(stroke));
         }

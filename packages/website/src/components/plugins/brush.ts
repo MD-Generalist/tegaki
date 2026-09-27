@@ -164,6 +164,8 @@ export const brushPlugin = createPlugin({
               : path.map((p) => ({ ...p, width: p.width * brushWidth(p.t, size, press) }))
         : undefined,
       paint(input, next) {
+        // Not drawn yet: pass it on, and the default painter shows nothing.
+        if (input.stroke.state === 'pending') return next(input);
         // A widened brush paints past the letters' edges, where clip-to-text doesn't reach.
         const s = sized ? { ...input, ctx: input.unclipped } : input;
         // A dot is a single dab.
