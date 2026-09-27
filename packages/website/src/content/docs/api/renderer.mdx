@@ -88,7 +88,7 @@ The effects are [plugins](#plugins) built into the renderer, run ahead of your o
 
 **Type:** `readonly TegakiPlugin[]`
 
-Code that reshapes, retimes or paints the ink, paints under or over it, or runs on every frame drawn: a brush, a pen at the tip, stroke-order arrows, a typist's pace, sound. They run after the built-in [effects](#effects). See [Plugins](#plugins). In React, keep the array stable (define it outside the component or memoize it), since a new array redraws the canvas. Plugins are functions, so the Astro component doesn't take them. `toSVG` leaves them out, except for when the strokes draw: it plays the timeline their `timing` makes.
+Code that reshapes, retimes or paints the ink, paints under or over it, or runs on every frame drawn: a brush, a pen at the tip, stroke-order arrows, a typist's pace, sound. They run after the built-in [effects](#effects). See [Plugins](#plugins). In React, keep the array stable (define it outside the component or memoize it), since a new array redraws the canvas. Plugins are functions, so the Astro component doesn't take them. `toSVG` draws the ink their `geometry` and `outline` shape, at the times their `timing` gives it. Painting hooks don't reach the file; a plugin's [`svg`](#in-an-exported-svg-svg) hook draws into it instead.
 
 ### `seed`
 
@@ -205,6 +205,7 @@ A plugin is an object with a `name` and any of these hooks:
 | `onFrame(frame, prev)` | after every frame is painted | sound, events, syncing other UI |
 | `bounds({ strokes, fontSize })` | when the layout changes | reserving room for what you paint outside the ink |
 | `outline(contour, ctx)` | once per glyph, with clip-to-text on | reshaping the letter shapes the ink is clipped to, in step with `geometry` |
+| `svg(svg)` | once per `toSVG` / `exportSVG` | what the plugin paints, in the exported SVG (see [In an exported SVG](#in-an-exported-svg-svg)) |
 | `steps: { count, fps, idle? }` | not a hook: a setting | redrawing the ink a few ways in turn, over time (see [Drawings over time](#drawings-over-time-steps)) |
 
 The built-in [effects](#effects) are plugins too, and run first, so each hook of yours sees what they made: `geometry` gets the path after pressure width, taper and wobble, and `paint` gets the gradient as its `style`.
@@ -374,6 +375,33 @@ const flicker: TegakiPlugin = {
 };
 ```
 
+### In an exported SVG: `svg`
+
+`toSVG` and `exportSVG` write markup, not canvas pixels, so the painting hooks (`paint`, `ink`, `underlay`, `overlay`) don't reach the file. The ink does: the file draws every stroke as `geometry` shaped it, clips it to letters as `outline` shaped them, and plays it at the times `timing` gave it. A plugin's `svg` hook draws the rest. It runs once per export and gets the strokes (placed and timed, in the file's px) with these ways to add to the file:
+
+| | |
+|---|---|
+| `defs(markup)` | a filter, gradient or pattern; name it with `id(name)`, which is unique in the file |
+| `underlay(markup)` / `overlay(markup)` | markup under or over the ink. Clip-to-text doesn't cut either. A looping file fades the overlay with the ink but keeps the underlay |
+| `ink(attrs)` | a `<g>` around the ink, after clip-to-text: `filter="url(#…)"`, `opacity="…"` |
+| `style(stroke, { color?, attrs? })` | one stroke's paint (in place of the text's, and of a stroke gradient), and a `<g>` of attributes around it |
+| `appear(t)` | what shows an element from timeline second `t` on, whether the file plays once (SMIL), loops (CSS) or is static: put `attrs` in its tag and `inner` inside it |
+| `seconds(t)` / `mode` | the file's own clock (the export's speed) and how it plays, for SMIL of your own |
+
+```ts
+const shadow: TegakiPlugin = {
+  name: 'shadow',
+  ink({ ctx }) { /* … the canvas shadow … */ },
+  svg(svg) {
+    const id = svg.id('shadow');
+    svg.defs(`<filter id="${id}"><feDropShadow dx="2" dy="3" stdDeviation="1" flood-opacity="0.4" /></filter>`);
+    svg.ink(`filter="url(#${id})"`);
+  },
+};
+```
+
+If the plugin has `bounds`, a cropped export takes them in. Only the first drawing of any [`steps`](#drawings-over-time-steps) is drawn.
+
 ### Plugins with options: `createPlugin(definition)`
 
 `createPlugin` turns a plugin into a factory that takes options. List what the plugin can be set to in `params`, and write the hooks in `setup`, which gets every option filled in:
@@ -454,7 +482,7 @@ How each glyph strays comes from its seed, the renderer's [`seed`](#seed) plus t
 | `warp` | `0.015` | A slow bend through the glyph, in ems. |
 | `width` | `0.12` | Ink width, as a share of the stroke's. |
 
-It comes with three presets: `Subtle`, `Loose` and `Signature`. Like any plugin, it isn't part of `toSVG`.
+It comes with three presets: `Subtle`, `Loose` and `Signature`. `toSVG` draws the glyphs as it varies them.
 
 ### Line boil: `boilPlugin`
 

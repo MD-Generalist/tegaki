@@ -88,6 +88,7 @@ export type {
   TegakiPluginSteps,
   TegakiQuality,
   TegakiStrokePaintContext,
+  TegakiSvgContext,
   TegakiSvgOptions,
   TegakiTimingContext,
   TimeControlMode,

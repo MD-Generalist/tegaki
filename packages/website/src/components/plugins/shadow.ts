@@ -1,17 +1,19 @@
 import { createPlugin, expandBox, unionBoxes } from 'tegaki/core';
 import { inkRegion, type Region, scratchCanvas, silhouette } from './ink-canvas.ts';
+import { num } from './svg.ts';
 
 /**
  * A shadow under the ink, the way it falls under a raised letter: the
  * finished ink's silhouette in the shadow's color, moved and blurred, laid
  * under it. With `bevel`, the ink's own edges catch the light on one side
  * and fall into shade on the other, so it looks embossed. An `ink` hook,
- * with `bounds` to make room for where the shadow falls.
+ * with `bounds` to make room for where the shadow falls, and an `svg` hook
+ * that casts it in an exported SVG with a filter.
  */
 export const shadowPlugin = createPlugin({
   name: 'shadow',
   label: 'Shadow',
-  description: 'A shadow under the ink, moved and blurred, and a bevel for an embossed look. ink + bounds.',
+  description: 'A shadow under the ink, moved and blurred, and a bevel for an embossed look. ink + bounds + svg.',
   params: {
     color: { type: 'color', label: 'Color', default: '#000000' },
     opacity: { type: 'number', label: 'Opacity', default: 0.3, min: 0, max: 1, step: 0.05 },
@@ -40,6 +42,18 @@ export const shadowPlugin = createPlugin({
     const reach = Math.max(Math.abs(x), Math.abs(y)) + 1.5 * blur;
     return {
       bounds: ({ strokes, fontSize }) => expandBox(unionBoxes(strokes.map((s) => s.path.bounds())), fontSize * reach),
+      // In an SVG, the shadow is a filter on the ink (the bevel is left to the canvas).
+      svg(svg) {
+        if (opacity <= 0) return;
+        const id = svg.id('shadow');
+        const f = svg.fontSize;
+        svg.defs(
+          `<filter id="${id}" x="-20%" y="-20%" width="140%" height="140%">` +
+            `<feDropShadow dx="${num(x * f)}" dy="${num(y * f)}" stdDeviation="${num((blur * f) / 2)}" flood-color="${color}" flood-opacity="${opacity}" />` +
+            '</filter>',
+        );
+        svg.ink(`filter="url(#${id})"`);
+      },
       ink({ ctx, bounds, fontSize }) {
         if (opacity <= 0 && bevel <= 0) return;
         const ink = ctx.canvas;

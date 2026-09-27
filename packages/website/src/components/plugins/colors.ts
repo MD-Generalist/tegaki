@@ -30,12 +30,13 @@ export function pickColor(colors: readonly string[], i: number, random?: (i: num
 /**
  * Each glyph, or each stroke, in its own color from a palette — in turn or
  * shuffled by the seed. A `paint` plugin: it changes the style the rest of
- * the chain paints with, so a brush or an echo paints in these colors too.
+ * the chain paints with, so a brush or an echo paints in these colors too —
+ * and `svg`, restyling each stroke of an exported SVG the same way.
  */
 export const colorsPlugin = createPlugin({
   name: 'colors',
   label: 'Colors',
-  description: 'Each glyph or stroke in its own color from a palette. paint.',
+  description: 'Each glyph or stroke in its own color from a palette. paint + svg.',
   params: {
     palette: {
       type: 'select',
@@ -71,6 +72,10 @@ export const colorsPlugin = createPlugin({
       paint(s, next) {
         const random = shuffle ? (i: number) => s.random(`colors:${i}`)() : undefined;
         next({ ...s, style: pickColor(colors, colorIndex(s.stroke, by), random) });
+      },
+      svg(svg) {
+        const random = shuffle ? (i: number) => svg.random(`colors:${i}`)() : undefined;
+        for (const s of svg.strokes) svg.style(s, { color: pickColor(colors, colorIndex(s, by), random) });
       },
     };
   },

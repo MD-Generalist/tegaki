@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import type { TegakiGlyphData } from '../types.ts';
 import { resolveEffects } from './effects.ts';
-import { placementsToSvg, type SvgExportConfig, type SvgGlyphPlacement } from './svgExport.ts';
+import { StrokePath } from './strokePath.ts';
+import { placementsToSvg, type SvgDecoration, type SvgExportConfig, type SvgGlyphPlacement } from './svgExport.ts';
 
 // A 1s horizontal line, then a dot at 1s.
 const glyph: TegakiGlyphData = {
@@ -228,5 +229,89 @@ describe('placementsToSvg viewBox', () => {
 
   test('crop: false keeps the full canvas box', () => {
     expect(svgOf({ animated: false, crop: false })).toContain('viewBox="0 0 200 100"');
+  });
+});
+
+describe('placementsToSvg plugin ink and decoration', () => {
+  // The line slanted: from (0, 50) to (100, 20), 10px wide.
+  const slanted = new StrokePath([
+    { x: 0, y: 50, width: 10, t: 0 },
+    { x: 100, y: 20, width: 10, t: 1 },
+  ]);
+  const deco = (over: Partial<SvgDecoration> = {}): SvgDecoration => ({
+    defs: [],
+    underlay: [],
+    overlay: [],
+    ink: [],
+    strokes: new Map(),
+    boxes: [],
+    ...over,
+  });
+
+  test("a stroke with ink is drawn from it, not from the bundle's points", () => {
+    const svg = svgOf({ animated: false }, { inks: [{ path: slanted, nibs: [] }] });
+    expect(svg).toContain('d="M 0 50 L 100 20"');
+    expect(svg).not.toContain('L 100 50');
+  });
+
+  test('ink of varying width is drawn a segment at a time', () => {
+    const tapered = slanted.map((p) => ({ ...p, width: p.t === 0 ? 2 : 10 }));
+    const svg = svgOf({ animated: false }, { inks: [{ path: tapered, nibs: [] }] });
+    expect(svg).toContain('<line x1="0" y1="50" x2="100" y2="20" stroke-width="6"');
+  });
+
+  test("a stroke style repaints the stroke and wraps it in the style's attributes", () => {
+    const svg = svgOf(
+      { animated: false, decorate: () => deco({ strokes: new Map([['3:0', { color: '#f00', attrs: 'opacity="0.5"' }]]) }) },
+      { entryIndex: 3 },
+    );
+    expect(svg).toMatch(/<g opacity="0.5">\n<path [^>]*stroke="#f00"/);
+    // The dot, stroke 1, keeps the text's color.
+    expect(svg).toContain('fill="#123"');
+  });
+
+  test('underlay goes under the ink, overlay over it, and ink attributes around it', () => {
+    const svg = svgOf({
+      animated: false,
+      decorate: () =>
+        deco({
+          underlay: ['<rect id="under" />'],
+          overlay: ['<rect id="over" />'],
+          ink: ['filter="url(#f)"'],
+          defs: ['<filter id="f" />'],
+        }),
+    });
+    const under = svg.indexOf('id="under"');
+    const ink = svg.indexOf('<g filter="url(#f)">');
+    const over = svg.indexOf('id="over"');
+    expect(under).toBeGreaterThan(-1);
+    expect(under).toBeLessThan(ink);
+    expect(ink).toBeLessThan(over);
+    expect(svg).toMatch(/<defs>[\s\S]*<filter id="f" \/>[\s\S]*<\/defs>/);
+  });
+
+  test('a loop fades the overlay with the ink but not the underlay', () => {
+    const svg = svgOf({ loop: true, decorate: () => deco({ underlay: ['<rect id="under" />'], overlay: ['<rect id="over" />'] }) });
+    const fade = svg.search(/<g class="tk-a\d+">/);
+    expect(svg.indexOf('id="under"')).toBeLessThan(fade);
+    expect(svg.indexOf('id="over"')).toBeGreaterThan(fade);
+  });
+
+  test('the clock shows markup when the strokes reach a time, at the export speed', () => {
+    let shown = '';
+    svgOf({
+      speed: 2,
+      decorate: (clock) => {
+        const a = clock.appear(1);
+        shown = `<text${a.attrs}>1${a.inner}</text>`;
+        return deco({ overlay: [shown] });
+      },
+    });
+    expect(shown).toContain('<set attributeName="opacity" to="1" begin="0.5s"');
+  });
+
+  test('the crop takes in the boxes plugins paint in', () => {
+    const svg = svgOf({ animated: false, decorate: () => deco({ boxes: [{ minX: -100, minY: 0, maxX: 0, maxY: 10 }] }) });
+    expect(Number(/viewBox="(-?[\d.]+)/.exec(svg)?.[1])).toBeLessThanOrEqual(-100);
   });
 });

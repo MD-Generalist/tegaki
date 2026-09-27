@@ -10,6 +10,7 @@ import {
   type StrokePath,
   unionBoxes,
 } from 'tegaki/core';
+import { inkMarkup, meanWidth, num, pathData } from './svg.ts';
 
 /** Where a stroke's guide goes: its number, and the arrow alongside it (none for a dot or a very short stroke). */
 export interface StrokeGuide {
@@ -92,7 +93,7 @@ export function layoutGuides(
 export const strokeOrderPlugin = createPlugin({
   name: 'stroke-order',
   label: 'Stroke order',
-  description: 'Numbers and arrows beside each stroke, kept clear of the ink, over a faint tracing of the text. underlay + overlay.',
+  description: 'Numbers and arrows beside each stroke, kept clear of the ink, over a faint tracing of the text. underlay + overlay + svg.',
   params: {
     accent: { type: 'color', label: 'Accent', default: '#e5484d' },
     numbers: { type: 'boolean', label: 'Numbers', default: true },
@@ -113,7 +114,7 @@ export const strokeOrderPlugin = createPlugin({
   },
   setup: ({ accent, numbers, arrows, tracing }) => {
     const guides = new WeakMap<StrokePath, StrokeGuide>();
-    const guideFor = (stroke: StrokeFrame, all: readonly StrokeFrame[], fontSize: number) => {
+    const guideFor = (stroke: GuideStroke, all: readonly GuideStroke[], fontSize: number) => {
       let guide = guides.get(stroke.path);
       if (!guide) {
         const glyph = all.filter((s) => s.entryIndex === stroke.entryIndex).sort((a, b) => a.strokeIndex - b.strokeIndex);
@@ -132,6 +133,53 @@ export const strokeOrderPlugin = createPlugin({
         if (tracing <= 0) return;
         ctx.globalAlpha = tracing;
         for (const s of frame.strokes) paintStroke({ ctx, stroke: { ...s, state: 'done', progress: 1 }, style: color, lineCap: 'round' });
+      },
+      // In an SVG: the tracing under the ink, each number's ring, filled once its stroke starts (in the accent while
+      // it draws, played once), and — played once — the arrow beside the stroke being drawn.
+      svg: ({ strokes, fontSize, color, mode, underlay, overlay, appear, seconds }) => {
+        if (tracing > 0) {
+          const paths = strokes.map((s) => s.path);
+          underlay(
+            `<g opacity="${tracing}" color="${color}" fill="none" stroke="${color}" stroke-linecap="round" stroke-linejoin="round">` +
+              `${inkMarkup(paths, meanWidth)}</g>`,
+          );
+        }
+        if (!numbers && !arrows) return;
+        const badge = BADGE * fontSize;
+        const line = Math.max(1, 0.014 * fontSize);
+        const out: string[] = [];
+        for (const s of strokes) {
+          const { number, arrow } = guideFor(s, strokes, fontSize);
+          const end = s.start + s.duration;
+          if (arrows && arrow && mode === 'once') {
+            out.push(
+              `<g opacity="0" fill="${accent}" stroke="${accent}" stroke-width="${num(line)}" stroke-linecap="round" stroke-linejoin="round">` +
+                arrowMarkup(arrow, badge) +
+                `<set attributeName="opacity" to="1" begin="${num(seconds(s.start))}s" />` +
+                `<set attributeName="opacity" to="0" begin="${num(seconds(end))}s" /></g>`,
+            );
+          }
+          if (!numbers) continue;
+          const label = String(s.strokeIndex + 1);
+          const text = (fill: string, extra = '') =>
+            `<text x="${num(number.x)}" y="${num(number.y + badge * 0.06)}" text-anchor="middle" dominant-baseline="central" ` +
+            `font-family="system-ui, sans-serif" font-weight="600" font-size="${num(badge * (label.length > 1 ? 1.05 : 1.3))}" fill="${fill}"${extra}>${label}</text>`;
+          const disc = `cx="${num(number.x)}" cy="${num(number.y)}" r="${num(badge)}"`;
+          if (mode !== 'static') {
+            out.push(
+              `<circle ${disc} fill="none" stroke="${color}" stroke-width="${num(line)}" opacity="0.4" />`,
+              text(color, ' opacity="0.6"'),
+            );
+          }
+          const shown = appear(s.start);
+          const fill =
+            mode === 'once'
+              ? `<circle ${disc} fill="${accent}"><set attributeName="fill" to="${color}" begin="${num(seconds(end))}s" />` +
+                `<set attributeName="fill-opacity" to="0.5" begin="${num(seconds(end))}s" /></circle>`
+              : `<circle ${disc} fill="${color}" fill-opacity="0.5" />`;
+          out.push(`<g${shown.attrs}>${fill}${text('#fff')}${shown.inner}</g>`);
+        }
+        overlay(out.join(''));
       },
       overlay: ({ ctx, frame, fontSize, color }) => {
         if (!numbers && !arrows) return;
@@ -173,6 +221,19 @@ export const strokeOrderPlugin = createPlugin({
     };
   },
 });
+
+/** What a guide is laid out from. */
+type GuideStroke = Pick<StrokeFrame, 'path' | 'entryIndex' | 'strokeIndex'>;
+
+/** An arrow as SVG: the line, and its head at the end (fill and stroke from around it). */
+function arrowMarkup(arrow: StrokePath, head: number): string {
+  const tip = arrow.pointAt(1);
+  const at = (a: number, r: number) => `${num(tip.x + Math.cos(tip.angle + a) * r)} ${num(tip.y + Math.sin(tip.angle + a) * r)}`;
+  return (
+    `<path d="${pathData(arrow)}" fill="none" />` +
+    `<path d="M ${at(0, head * 0.4)} L ${at(2.5, head)} L ${at(-2.5, head)} Z" stroke="none" />`
+  );
+}
 
 function overlaps(a: Box | null, b: Box | null): boolean {
   return !!a && !!b && a.minX <= b.maxX && b.minX <= a.maxX && a.minY <= b.maxY && b.minY <= a.maxY;

@@ -16,7 +16,7 @@ import { cooled, emitterAt } from './laser.ts';
 import { brightness } from './neon.ts';
 import { broadNib, nibFactor } from './nib.ts';
 import { grainTile } from './noise.ts';
-import { paperBounds, paperLayout } from './paper.ts';
+import { type PaperLayout, paperBounds, paperLayout, paperShapes } from './paper.ts';
 import { penPoses } from './pen.ts';
 import { handTimes } from './rhythm.ts';
 import { shakeAt, shakeStrength } from './shake.ts';
@@ -661,5 +661,26 @@ describe('sweep', () => {
       { start: 1, duration: 0.3 },
       { start: 2, duration: 0.3 },
     ]);
+  });
+});
+
+describe('practice paper shapes', () => {
+  const layout: PaperLayout = { lines: [{ left: 0, right: 100, baseline: 80, middle: 60 }], cells: [{ x: 0, y: 10, size: 50 }] };
+
+  test('a ruled line is a capital line, a dashed middle line and the baseline', () => {
+    const { rules, squares } = paperShapes(layout, 'ruled', 100);
+    expect(rules.map((r) => [r.y0, r.dashed])).toEqual([
+      [10, false],
+      [45, true],
+      [80, false],
+    ]);
+    expect(squares).toEqual([]);
+  });
+
+  test('a 米字格 square has its cross and both diagonals, dashed', () => {
+    const { rules, squares } = paperShapes(layout, 'mi', 100);
+    expect(squares).toHaveLength(1);
+    expect(rules).toHaveLength(4);
+    expect(rules.every((r) => r.dashed)).toBe(true);
   });
 });

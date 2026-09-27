@@ -1,4 +1,5 @@
 import { type Box, createPlugin, type PlacedStroke, paintStroke, unionBoxes } from 'tegaki/core';
+import { inkMarkup, meanWidth, num } from './svg.ts';
 
 export type PaperStyle = 'ruled' | 'tian' | 'mi' | 'graph';
 
@@ -79,6 +80,65 @@ export function paperBounds(layout: PaperLayout, style: PaperStyle, fontSize: nu
   return unionBoxes(layout.cells.map((c) => ({ minX: c.x, minY: c.y, maxX: c.x + c.size, maxY: c.y + c.size })));
 }
 
+/** A line of the paper, in text-box px: dashed or solid, and how strongly it shows (× the paper's opacity). */
+export interface PaperRule {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  dashed: boolean;
+  alpha: number;
+}
+
+/** What the paper draws: its lines, and the squares around practice cells (solid, at the paper's opacity). */
+export function paperShapes(layout: PaperLayout, style: PaperStyle, fontSize: number): { rules: PaperRule[]; squares: PaperCell[] } {
+  const rules: PaperRule[] = [];
+  const squares: PaperCell[] = [];
+  const rule = (x0: number, y0: number, x1: number, y1: number, dashed = false, alpha = 1) => rules.push({ x0, y0, x1, y1, dashed, alpha });
+  if (style === 'ruled') {
+    for (const l of layout.lines) {
+      const x0 = l.left - RUN * fontSize;
+      const x1 = l.right + RUN * fontSize;
+      rule(x0, l.baseline - CAP * fontSize, x1, l.baseline - CAP * fontSize);
+      rule(x0, l.baseline - MIDDLE * fontSize, x1, l.baseline - MIDDLE * fontSize, true, 0.8);
+      rule(x0, l.baseline, x1, l.baseline);
+    }
+  } else if (style === 'graph') {
+    const box = paperBounds(layout, style, fontSize);
+    if (box) {
+      const step = fontSize / 4;
+      const snap = (v: number) => Math.floor(v / step) * step;
+      for (let x = snap(box.minX); x <= box.maxX; x += step)
+        rule(x, box.minY, x, box.maxY, false, Math.round(x / step) % 4 === 0 ? 1 : 0.45);
+      for (let y = snap(box.minY); y <= box.maxY; y += step)
+        rule(box.minX, y, box.maxX, y, false, Math.round(y / step) % 4 === 0 ? 1 : 0.45);
+    }
+  } else {
+    for (const c of layout.cells) {
+      squares.push(c);
+      const mx = c.x + c.size / 2;
+      const my = c.y + c.size / 2;
+      rule(mx, c.y, mx, c.y + c.size, true, 0.8);
+      rule(c.x, my, c.x + c.size, my, true, 0.8);
+      if (style === 'mi') {
+        rule(c.x, c.y, c.x + c.size, c.y + c.size, true, 0.6);
+        rule(c.x + c.size, c.y, c.x, c.y + c.size, true, 0.6);
+      }
+    }
+  }
+  return { rules, squares };
+}
+
+/** The paper's line width and dash pattern, in px. */
+function paperPen(fontSize: number): { line: number; dash: [number, number] } {
+  return { line: Math.max(1, fontSize * 0.012), dash: [fontSize * 0.04, fontSize * 0.035] };
+}
+
+/** The tracing guide's dot size, in px. */
+function traceDot(fontSize: number): number {
+  return Math.max(1.5, fontSize * 0.022);
+}
+
 /**
  * A practice sheet under the text, laid out by where its glyphs sit: school
  * ruled lines (capital line, dashed middle, baseline), a 田字格 or 米字格
@@ -86,12 +146,13 @@ export function paperBounds(layout: PaperLayout, style: PaperStyle, fontSize: nu
  * practised on — or graph paper, with a tracing guide of the text to come
  * if wanted. An `underlay`: clip-to-text doesn't cut it,
  * and it's under the ink. Each stroke knows where its glyph sits (`place`),
- * which is all the layout needs.
+ * which is all the layout needs. Its `svg` hook lays the same sheet under an
+ * exported SVG.
  */
 export const paperPlugin = createPlugin({
   name: 'paper',
   label: 'Practice paper',
-  description: 'Ruled lines, 田字格 / 米字格 squares or graph paper under the text, laid out by its glyphs. underlay + bounds.',
+  description: 'Ruled lines, 田字格 / 米字格 squares or graph paper under the text, laid out by its glyphs. underlay + bounds + svg.',
   params: {
     style: {
       type: 'select',
@@ -125,27 +186,40 @@ export const paperPlugin = createPlugin({
     'Kanji tracing': { style: 'tian', color: '#e5484d', opacity: 0.5, trace: 'faint' },
   },
   setup: ({ style, color, opacity, trace }) => {
-    let cached: { first: PlacedStroke | undefined; count: number; fontSize: number; layout: PaperLayout } | null = null;
-    const layoutOf = (strokes: readonly PlacedStroke[], fontSize: number) => {
+    let cached: { first: PlacedStroke | undefined; count: number; fontSize: number; shapes: ReturnType<typeof paperShapes> } | null = null;
+    const shapesOf = (strokes: readonly PlacedStroke[], fontSize: number) => {
       // Frames come and go, but their strokes stay where the layout put them.
       const first = strokes[0];
       if (cached?.first?.path !== first?.path || cached?.count !== strokes.length || cached?.fontSize !== fontSize) {
-        cached = { first, count: strokes.length, fontSize, layout: paperLayout(strokes, fontSize) };
+        cached = { first, count: strokes.length, fontSize, shapes: paperShapes(paperLayout(strokes, fontSize), style, fontSize) };
       }
-      return cached.layout;
+      return cached.shapes;
     };
     return {
       bounds: ({ strokes, fontSize }) => paperBounds(paperLayout(strokes, fontSize), style, fontSize),
       underlay({ ctx, frame, fontSize, color: ink }) {
-        const layout = layoutOf(frame.strokes, fontSize);
-        drawPaper(layout, fontSize);
+        const { rules, squares } = shapesOf(frame.strokes, fontSize);
+        const { line, dash } = paperPen(fontSize);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = line;
+        ctx.setLineDash([]);
+        ctx.globalAlpha = opacity;
+        for (const c of squares) ctx.strokeRect(c.x, c.y, c.size, c.size);
+        for (const r of rules) {
+          ctx.setLineDash(r.dashed ? dash : []);
+          ctx.globalAlpha = opacity * r.alpha;
+          ctx.beginPath();
+          ctx.moveTo(r.x0, r.y0);
+          ctx.lineTo(r.x1, r.y1);
+          ctx.stroke();
+        }
         // The guide, over the paper: each stroke whole, faint, or as a line of dots along its middle.
         ctx.setLineDash([]);
         if (trace === 'faint') {
           ctx.globalAlpha = 0.16;
           for (const s of frame.strokes) paintStroke({ ctx, stroke: { ...s, state: 'done', progress: 1 }, style: ink, lineCap: 'round' });
         } else if (trace === 'dotted') {
-          const dot = Math.max(1.5, fontSize * 0.022);
+          const dot = traceDot(fontSize);
           ctx.globalAlpha = 0.35;
           ctx.strokeStyle = ink;
           ctx.fillStyle = ink;
@@ -165,54 +239,35 @@ export const paperPlugin = createPlugin({
             ctx.stroke();
           }
         }
-
-        function drawPaper(layout: PaperLayout, fontSize: number) {
-          const line = Math.max(1, fontSize * 0.012);
-          const dash = [fontSize * 0.04, fontSize * 0.035];
-          ctx.globalAlpha = opacity;
-          ctx.strokeStyle = color;
-          ctx.lineWidth = line;
-          const rule = (x0: number, y0: number, x1: number, y1: number, dashed = false, alpha = 1) => {
-            ctx.setLineDash(dashed ? dash : []);
-            ctx.globalAlpha = opacity * alpha;
-            ctx.beginPath();
-            ctx.moveTo(x0, y0);
-            ctx.lineTo(x1, y1);
-            ctx.stroke();
-          };
-          if (style === 'ruled') {
-            for (const l of layout.lines) {
-              const x0 = l.left - RUN * fontSize;
-              const x1 = l.right + RUN * fontSize;
-              rule(x0, l.baseline - CAP * fontSize, x1, l.baseline - CAP * fontSize);
-              rule(x0, l.baseline - MIDDLE * fontSize, x1, l.baseline - MIDDLE * fontSize, true, 0.8);
-              rule(x0, l.baseline, x1, l.baseline);
-            }
-          } else if (style === 'graph') {
-            const box = paperBounds(layout, style, fontSize);
-            if (!box) return;
-            const step = fontSize / 4;
-            const snap = (v: number) => Math.floor(v / step) * step;
-            for (let x = snap(box.minX); x <= box.maxX; x += step)
-              rule(x, box.minY, x, box.maxY, false, Math.round(x / step) % 4 === 0 ? 1 : 0.45);
-            for (let y = snap(box.minY); y <= box.maxY; y += step)
-              rule(box.minX, y, box.maxX, y, false, Math.round(y / step) % 4 === 0 ? 1 : 0.45);
-          } else {
-            for (const c of layout.cells) {
-              ctx.setLineDash([]);
-              ctx.globalAlpha = opacity;
-              ctx.strokeRect(c.x, c.y, c.size, c.size);
-              const mx = c.x + c.size / 2;
-              const my = c.y + c.size / 2;
-              rule(mx, c.y, mx, c.y + c.size, true, 0.8);
-              rule(c.x, my, c.x + c.size, my, true, 0.8);
-              if (style === 'mi') {
-                rule(c.x, c.y, c.x + c.size, c.y + c.size, true, 0.6);
-                rule(c.x + c.size, c.y, c.x, c.y + c.size, true, 0.6);
-              }
-            }
-          }
+      },
+      svg({ strokes, fontSize, color: ink, underlay }) {
+        const { rules, squares } = paperShapes(paperLayout(strokes, fontSize), style, fontSize);
+        const { line, dash } = paperPen(fontSize);
+        const out = [
+          `<g fill="none" stroke="${color}" stroke-width="${num(line)}">`,
+          ...squares.map(
+            (c) => `<rect x="${num(c.x)}" y="${num(c.y)}" width="${num(c.size)}" height="${num(c.size)}" stroke-opacity="${opacity}" />`,
+          ),
+          ...rules.map(
+            (r) =>
+              `<line x1="${num(r.x0)}" y1="${num(r.y0)}" x2="${num(r.x1)}" y2="${num(r.y1)}" stroke-opacity="${num(opacity * r.alpha)}"` +
+              `${r.dashed ? ` stroke-dasharray="${dash.map(num).join(' ')}"` : ''} />`,
+          ),
+          '</g>',
+        ];
+        const paths = strokes.map((s) => s.path);
+        if (trace === 'faint') {
+          out.push(
+            `<g opacity="0.16" color="${ink}" fill="none" stroke="${ink}" stroke-linecap="round" stroke-linejoin="round">${inkMarkup(paths, meanWidth)}</g>`,
+          );
+        } else if (trace === 'dotted') {
+          const dot = traceDot(fontSize);
+          out.push(
+            `<g opacity="0.35" color="${ink}" fill="none" stroke="${ink}" stroke-linecap="round" stroke-dasharray="0 ${num(dot * 2.4)}">` +
+              `${inkMarkup(paths, () => dot)}</g>`,
+          );
         }
+        underlay(out.join(''));
       },
     };
   },

@@ -290,6 +290,42 @@ export interface TegakiTimingContext {
 }
 
 /**
+ * What an `svg` hook adds to `toSVG` / `exportSVG`'s file. Markup is SVG
+ * source in the file's px, the space `strokes` are given in (the text box
+ * moved by the canvas's padding). Give anything you `defs` an {@link id}.
+ */
+export interface TegakiSvgContext {
+  /** Every stroke, placed and timed — the first drawing of any `steps`. */
+  strokes: readonly PlacedStroke[];
+  /** Seconds the timeline runs. */
+  duration: number;
+  /** Font size in px. */
+  fontSize: number;
+  /** The text's color. */
+  color: string;
+  /** `'static'`: the finished artwork; `'once'`: SMIL, played once; `'loop'`: CSS keyframes, drawn, held, faded and repeated. */
+  mode: 'static' | 'once' | 'loop';
+  /** See {@link TegakiPluginContext.random}. */
+  random(key: string | number): () => number;
+  /** A document-unique id starting with `name`. */
+  id(name: string): string;
+  /** Add to `<defs>`: a filter, gradient or pattern. */
+  defs(markup: string): void;
+  /** Add under the ink. Clip-to-text doesn't cut it, and a loop doesn't fade it. */
+  underlay(markup: string): void;
+  /** Add over the ink. Clip-to-text doesn't cut it; a loop fades it with the ink. */
+  overlay(markup: string): void;
+  /** Wrap the ink (after clip-to-text) in `<g {attrs}>` — e.g. `filter="url(#…)"`. The first call is innermost. */
+  ink(attrs: string): void;
+  /** Restyle one stroke: its paint (in place of the text's and a stroke gradient's) and attributes for a `<g>` around it. */
+  style(stroke: PlacedStroke, style: { color?: string; attrs?: string }): void;
+  /** What shows an element from timeline second `t` on, in any mode: `attrs` go in its tag, `inner` inside it. */
+  appear(t: number): { attrs: string; inner: string };
+  /** Seconds in the file for timeline second `t` (the export's speed), for SMIL of your own. */
+  seconds(t: number): number;
+}
+
+/**
  * Paints alongside the handwriting, reshapes it, or reacts to it. Every hook
  * is optional. The built-in effects are plugins too, run before these, so a
  * plugin sees the ink they make. Painting is a function of the frame alone:
@@ -357,6 +393,14 @@ export interface TegakiPlugin {
    * it the same from frame to frame: the canvas is sized once, not per frame.
    */
   bounds?(ctx: TegakiBoundsContext): Box | null;
+  /**
+   * Draw into `toSVG` / `exportSVG`'s file, which the painting hooks don't
+   * reach (the file is markup, not a canvas): add defs, markup under or over
+   * the ink, attributes around it, or restyle strokes. `geometry`, `outline`
+   * and `timing` need no SVG of their own — the file draws the ink they shape
+   * and time. A plugin with `bounds` has the crop take them in.
+   */
+  svg?(svg: TegakiSvgContext): void;
   /**
    * Redraw the ink as a cycle of drawings over time. `geometry` and
    * `outline` are called once per drawing per layout, told which one in

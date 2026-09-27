@@ -32,10 +32,13 @@ import {
 } from '../lib/strokeTimeline.ts';
 import {
   placementsToSvg,
+  type SvgClock,
+  type SvgDecoration,
   type SvgExportConfig,
   type SvgFallbackText,
   type SvgGlyphOutline,
   type SvgGlyphPlacement,
+  type SvgStrokeInk,
   type SvgTextRun,
 } from '../lib/svgExport.ts';
 import type { TextLayout } from '../lib/textLayout.ts';
@@ -67,6 +70,7 @@ import type {
   TegakiPlugin,
   TegakiQuality,
   TegakiStrokePaintContext,
+  TegakiSvgContext,
   TegakiSvgOptions,
   TimeControlMode,
   TimeControlProp,
@@ -121,6 +125,11 @@ function entryOrigin(
       ? (lineLeftEm + entry.xOffsetEm) * fontSize
       : (layout.charOffsets[entry.graphemeIndex] ?? 0) * fontSize;
   return { x, y, glyphY: y + halfLeading + (entry.yOffsetEm ?? 0) * fontSize };
+}
+
+/** A px coordinate for SVG path data, to a hundredth. */
+function fmtPx(n: number): string {
+  return (Math.round(n * 100) / 100).toString();
 }
 
 function parseLetterSpacing(value: string): number {
@@ -615,6 +624,23 @@ export class TegakiEngine {
       letterSpacing: this._letterSpacing,
       featureSettings: toCssFeatureSettings(font.features ?? []),
     };
+    // The ink as the canvas draws it (the first drawing of any steps), moved by the padding into the file's px.
+    const plugins = this._allPlugins();
+    const drawing = allPluginSteps(plugins, 1)[0]!;
+    const shift = (path: StrokePath) => (padH === 0 && padV === 0 ? path : path.map((p) => ({ ...p, x: p.x + padH, y: p.y + padV })));
+    const strokes = this._placedStrokes(drawing).map((s) => ({
+      ...s,
+      path: shift(s.path),
+      rawPath: shift(s.rawPath),
+      place: { ...s.place, x: s.place.x + padH, y: s.place.y + padV },
+    }));
+    const inks = new Map<number, (SvgStrokeInk | undefined)[]>();
+    for (const s of strokes) {
+      let list = inks.get(s.entryIndex);
+      if (!list) inks.set(s.entryIndex, (list = []));
+      list[s.strokeIndex] = { path: s.path, nibs: s.nibs };
+    }
+
     const placements: SvgGlyphPlacement[] = [];
     const fallbackTexts: SvgFallbackText[] = [];
     const fallbackClips = this._fallbackRunClips(layout, characters, graphemeToLine, fontSize);
@@ -640,6 +666,8 @@ export class TegakiEngine {
           strokeDurations: entry.strokeDurations,
           strokeTimeScale: entry.strokeTimeScale,
           seed: this._seed + charIdx,
+          inks: inks.get(ei),
+          entryIndex: ei,
         });
       } else if (!entry.hasGlyph && /\S/u.test(entry.char)) {
         // Drawn from the fallback font once its slot ends, as `_render` does.
@@ -677,7 +705,21 @@ export class TegakiEngine {
     // `_render` clips to the text filled in its font: the shaped glyphs'
     // outlines, or — without them — the words set in the font, where the DOM put them.
     let clip: SvgExportConfig['clipText'];
-    const outlines = clipText ? this._glyphOutlines(graphemeToLine, padH, padV) : null;
+    // Reshaped by the plugins' `outline` as the canvas's mask is, else placed by a transform.
+    const reshape = clipText ? outlineWith(plugins, this._reportPluginError, shapeSteps(drawing).steps) : undefined;
+    const outlines = !clipText
+      ? null
+      : reshape
+        ? this._glyphOutlines(graphemeToLine)?.map((g) => ({
+            d: this._reshapedContours(g, maxSegLenFU, font.ascender, fontSize, reshape)
+              .map((c) => `M ${c.map((p) => `${fmtPx(p.x + padH)} ${fmtPx(p.y + padV)}`).join(' L ')} Z`)
+              .join(' '),
+            x: 0,
+            y: 0,
+            scale: 1,
+            placed: true,
+          }))
+        : this._glyphOutlines(graphemeToLine, padH, padV);
     if (outlines) {
       clip = { glyphs: outlines };
     } else if (clipText) {
@@ -719,7 +761,51 @@ export class TegakiEngine {
       clipText: clip,
       fallback: fallbackTexts.length > 0 ? { font: textFont, texts: fallbackTexts } : undefined,
       fontFaces: opts.fontFaces,
+      decorate: plugins.some((p) => p.svg) ? (clock) => this._svgDecoration(plugins, strokes, clock, color) : undefined,
     });
+  }
+
+  /** What the plugins' `svg` hooks add to the file, and the boxes of those with `bounds` for the crop. */
+  private _svgDecoration(
+    plugins: readonly TegakiPlugin[],
+    strokes: readonly PlacedStroke[],
+    clock: SvgClock,
+    color: string,
+  ): SvgDecoration {
+    const deco: SvgDecoration = { defs: [], underlay: [], overlay: [], ink: [], strokes: new Map(), boxes: [] };
+    const fontSize = this._fontSize;
+    let ids = 0;
+    const svg: TegakiSvgContext = {
+      strokes,
+      duration: this._timeline.totalDuration,
+      fontSize,
+      color,
+      mode: clock.mode,
+      random: (key) => seededRandom(this._seed, key),
+      id: (name) => `${name}-${ids++}`,
+      defs: (markup) => deco.defs.push(markup),
+      underlay: (markup) => deco.underlay.push(markup),
+      overlay: (markup) => deco.overlay.push(markup),
+      ink: (attrs) => deco.ink.push(attrs),
+      style: (stroke, style) => {
+        const prev = deco.strokes.get(stroke.id);
+        const attrs = [prev?.attrs, style.attrs].filter(Boolean).join(' ');
+        deco.strokes.set(stroke.id, { color: style.color ?? prev?.color, attrs: attrs || undefined });
+      },
+      appear: (t) => clock.appear(t),
+      seconds: (t) => clock.seconds(t),
+    };
+    for (const plugin of plugins) {
+      if (!plugin.svg) continue;
+      this._runHook(plugin, 'svg', () => plugin.svg!(svg));
+      if (plugin.bounds) {
+        this._runHook(plugin, 'bounds', () => {
+          const box = plugin.bounds!({ strokes, fontSize });
+          if (box) deco.boxes.push(box);
+        });
+      }
+    }
+    return deco;
   }
 
   /**
@@ -1784,11 +1870,7 @@ export class TegakiEngine {
       let path = cache.get(id);
       if (!path) {
         path = new Path2D();
-        const place = { x: g.x, y: g.y - ascender * g.scale, scale: g.scale, ascender };
-        for (const contour of flattenPath(g.d, segmentLengthFU)) {
-          const pts: { x: number; y: number }[] = [];
-          for (let i = 0; i < contour.length; i += 2) pts.push({ x: g.x + contour[i]! * g.scale, y: g.y - contour[i + 1]! * g.scale });
-          const out = reshape(pts, { place, seed, fontSize });
+        for (const out of this._reshapedContours(g, segmentLengthFU, ascender, fontSize, reshape)) {
           for (let i = 0; i < out.length; i++) {
             if (i === 0) path.moveTo(out[i]!.x, out[i]!.y);
             else path.lineTo(out[i]!.x, out[i]!.y);
@@ -1798,6 +1880,22 @@ export class TegakiEngine {
         cache.set(id, path);
       }
       return { path, placed: true };
+    });
+  }
+
+  /** An outline's contours, flattened as finely as the strokes are subdivided, placed in px and reshaped by the `outline` hooks. */
+  private _reshapedContours(
+    g: SvgGlyphOutline,
+    segmentLengthFU: number,
+    ascender: number,
+    fontSize: number,
+    reshape: NonNullable<ReturnType<typeof outlineWith>>,
+  ): { x: number; y: number }[][] {
+    const place = { x: g.x, y: g.y - ascender * g.scale, scale: g.scale, ascender };
+    return flattenPath(g.d, segmentLengthFU).map((contour) => {
+      const pts: { x: number; y: number }[] = [];
+      for (let i = 0; i < contour.length; i += 2) pts.push({ x: g.x + contour[i]! * g.scale, y: g.y - contour[i + 1]! * g.scale });
+      return reshape(pts, { place, seed: g.seed ?? 0, fontSize });
     });
   }
 
