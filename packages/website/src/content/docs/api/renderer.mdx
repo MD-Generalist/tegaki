@@ -173,7 +173,7 @@ Every stroke at `time` (default: the current time). For each stroke you get:
 
 - `state`: `'pending'`, `'drawing'` or `'done'`.
 - `progress`: the eased draw progress, 0–1.
-- `path`: the whole stroke as the canvas draws it, a [`StrokePath`](#strokepath) in CSS px from the top-left of the text box, reshaped by every plugin's `geometry` (the built-in wobble, pressure width and taper among them). `rawPath` is the stroke as the bundle has it, before any of them: unwobbled, with the bundle's own widths.
+- `path`: the whole stroke, a [`StrokePath`](#strokepath) in CSS px from the top-left of the text box, reshaped by every plugin's `geometry` (the built-in wobble, pressure width and taper among them), its widths the pen's own. With clip-to-text set to a factor (`clipText: 1.2`), the default painter draws it that much wider on the clipped canvas so the ink fills the letters; the path doesn't carry that. `rawPath` is the stroke as the bundle has it, before any plugin: unwobbled, with the bundle's own widths.
 - `nibs`: the stroke's nib stamps (blobs the pen leaves at some points), placed along `path`: `t`, an offset `dx`/`dy` in px, radii `rx`/`ry` as multiples of the ink width there, and an `angle`.
 - `seed`: a number fixed per glyph, which the built-in effects vary by.
 - `place`: where the stroke's glyph sits: `x` and `y` in px (the top of the glyph's ascender at its left edge), `scale` (px per font unit) and `ascender` (in font units), so the baseline is at `y + ascender * scale`. With `glyph.w * scale`, the glyph's advance, it's what a practice grid lays its squares out by.
@@ -231,7 +231,7 @@ const swell: TegakiPlugin = {
 
 `paint` is called for every stroke on every frame, including the ones the pen hasn't reached (their `stroke.state` is `'pending'`), so a plugin can decide for itself what shows when: stamp a whole glyph the moment its first stroke starts, the way a typewriter does, or start from the text written out and rub it away. The default painter paints only what's drawn, so a pending stroke passed on unchanged shows nothing; to show it, pass it on with `state: 'done'` and the `progress` you want. Anything you draw directly, rather than through `next`, should check `stroke.state` first.
 
-With clip-to-text on, everything painted on `ctx` is cut to the letters' shapes once the strokes are drawn. To paint past their edges (a wide brush, a pass around the ink, flecks off the line), paint on `unclipped` instead: pass the stroke on as `next({ ...stroke, ctx: stroke.unclipped })`, or draw on it directly. It's a layer of its own, laid under the clipped ink before the `ink` hooks run, so a glow or a shadow still sees it as ink. With clip-to-text off it's `ctx` itself.
+With clip-to-text on, everything painted on `ctx` is cut to the letters' shapes once the strokes are drawn. To paint past their edges (a wide brush, a pass around the ink, flecks off the line), paint on `unclipped` instead: pass the stroke on as `next({ ...stroke, ctx: stroke.unclipped })`, or draw on it directly. It's a layer of its own, laid under the clipped ink before the `ink` hooks run, so a glow or a shadow still sees it as ink, and strokes painted on it keep the pen's own width (clip-to-text's widening is only for ink it cuts). With clip-to-text off it's `ctx` itself.
 
 ```ts
 // A broad nib's full width, whether or not the text is clipped.

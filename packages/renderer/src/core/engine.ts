@@ -14,6 +14,7 @@ import { fallbackRuns } from '../lib/fallbackRuns.ts';
 import { LETTER_SPACED_OFF_FEATURES, toCssFeatureSettings } from '../lib/features.ts';
 import { ensureFont, ensureFontFace, fontDataUri } from '../lib/font.ts';
 import { type CanvasOverflow, glyphInkBounds, inkOverflow, NO_OVERFLOW } from '../lib/inkBounds.ts';
+import { paintStroke } from '../lib/paintStroke.ts';
 import { seededRandom } from '../lib/random.ts';
 import type { BundleShaper, ShapeOptions } from '../lib/shaper.ts';
 import { type SubdividedStroke, subdivideStroke } from '../lib/strokeCache.ts';
@@ -63,6 +64,7 @@ import type {
   TegakiPaintContext,
   TegakiPlugin,
   TegakiQuality,
+  TegakiStrokePaintContext,
   TegakiSvgOptions,
   TimeControlMode,
   TimeControlProp,
@@ -324,6 +326,18 @@ export class TegakiEngine {
     clipText: boolean;
     list: readonly TegakiPlugin[];
   } | null = null;
+  /** Paths drawn wider by clip-to-text's factor, by the path and factor. */
+  private _widenedPaths = new WeakMap<StrokePath, { factor: number; path: StrokePath }>();
+
+  /** `path` with every width times `factor` — how clip-to-text draws the ink it clips. */
+  private _widened(path: StrokePath, factor: number): StrokePath {
+    const cached = this._widenedPaths.get(path);
+    if (cached?.factor === factor) return cached.path;
+    const wide = path.map((p) => ({ ...p, width: p.width * factor }));
+    this._widenedPaths.set(path, { factor, path: wide });
+    return wide;
+  }
+
   /** Each placed stroke's ink box (see `strokeInkBounds`), by its path — what the frame's ink covers is their union. */
   private _inkBoxes = new WeakMap<StrokePath, Box | null>();
   /** What the ink and the plugins' `bounds` cover, memoized for the placed strokes and plugins it was computed from. */
@@ -1792,12 +1806,11 @@ export class TegakiEngine {
       for (const charIdx of line) graphemeToLine.set(charIdx, li);
     });
     const entries = this._timeline.entries;
-    const clipText = this._quality?.clipText;
     const random = (key: string | number) => seededRandom(this._seed, key);
+    // At the pen's own width: clip-to-text's widening is the painter's business (see `_render`).
     const list = placeStrokes(strokes, {
       reshape: reshapeWith(plugins, { fontSize, random }, this._reportPluginError, shaping.steps),
       getSubdivided: this._subdivider(font, scale),
-      strokeScale: typeof clipText === 'number' ? clipText : 1,
       placeEntry: (ei) => {
         const entry = entries[ei]!;
         const lineIdx = graphemeToLine.get(entry.graphemeIndex);
@@ -2090,7 +2103,16 @@ export class TegakiEngine {
     const random = (key: string | number) => seededRandom(this._seed, key);
     const frame = sampleFrame(this._placedStrokes(), currentTime, this._timing);
     const strokes = frame.strokes;
-    const paint = paintWith(plugins, this._reportPluginError, undefined, this._steps.steps);
+    // Clip-to-text with a factor draws the ink that much wider, so it fills the
+    // letters before the mask cuts it — on the clipped canvas only: a stroke
+    // painted on `unclipped` keeps the pen's own width.
+    const widen = typeof clipText === 'number' && clipText !== 1 ? clipText : 1;
+    const painter =
+      widen === 1
+        ? paintStroke
+        : (s: TegakiStrokePaintContext) =>
+            paintStroke(s.ctx === ctx ? { ...s, stroke: { ...s.stroke, path: this._widened(s.stroke.path, widen) } } : s);
+    const paint = paintWith(plugins, this._reportPluginError, painter, this._steps.steps);
     // `paint` sees every stroke, drawn or not. A plugin's `paint` may show a
     // stroke before the pen gets to it, so with one the ink may be anywhere a
     // stroke is; the built-in effects paint only what's drawn.
