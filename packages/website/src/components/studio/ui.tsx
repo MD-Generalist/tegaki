@@ -1,5 +1,6 @@
-import { type ReactNode, type RefObject, useEffect, useRef, useState } from 'react';
-import { ChevronDownIcon, ResetIcon } from './icons.tsx';
+import { type ReactNode, type RefObject, useCallback, useEffect, useId, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { ChevronDownIcon, InfoIcon, ResetIcon } from './icons.tsx';
 
 export function cx(...parts: (string | false | null | undefined)[]): string {
   return parts.filter(Boolean).join(' ');
@@ -209,6 +210,73 @@ export function Section({
       </div>
       {open && <div className="flex flex-col gap-1.5 px-3 pb-4">{children}</div>}
     </section>
+  );
+}
+
+/**
+ * An ⓘ that shows `children` in a bubble below it — on hover or keyboard
+ * focus, or a tap on touch screens. The bubble is portaled to the body so a
+ * scrolling panel can't clip it, and kept inside the viewport.
+ */
+export function InfoTip({ label, children }: { label: string; children: ReactNode }) {
+  const ref = useRef<HTMLButtonElement>(null);
+  const id = useId();
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  const show = () => {
+    const r = ref.current?.getBoundingClientRect();
+    if (r) setAt({ x: r.left + r.width / 2, y: r.bottom });
+  };
+  const hide = useCallback(() => setAt(null), []);
+  useEffect(() => {
+    if (!at) return;
+    // The bubble is placed once, so it goes when what it's placed by moves.
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && hide();
+    const onDown = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && hide();
+    window.addEventListener('scroll', hide, true);
+    window.addEventListener('resize', hide);
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('pointerdown', onDown);
+    return () => {
+      window.removeEventListener('scroll', hide, true);
+      window.removeEventListener('resize', hide);
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('pointerdown', onDown);
+    };
+  }, [at, hide]);
+  const width = 240;
+  return (
+    <>
+      <button
+        ref={ref}
+        type="button"
+        aria-label={label}
+        aria-describedby={at ? id : undefined}
+        className="ml-1 inline-flex size-4 shrink-0 items-center justify-center rounded-full text-zinc-400 hover:text-zinc-700 focus-visible:text-zinc-700 dark:text-zinc-500 dark:hover:text-zinc-200 dark:focus-visible:text-zinc-200"
+        onMouseEnter={show}
+        onMouseLeave={hide}
+        onFocus={show}
+        onBlur={hide}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (at) hide();
+          else show();
+        }}
+      >
+        <InfoIcon size={12} />
+      </button>
+      {at &&
+        createPortal(
+          <div
+            id={id}
+            role="tooltip"
+            className="pointer-events-none fixed z-[100] rounded-lg bg-zinc-900 px-2.5 py-1.5 text-[11px] leading-snug font-normal text-zinc-100 shadow-lg dark:bg-zinc-100 dark:text-zinc-900"
+            style={{ width, left: Math.max(8, Math.min(at.x - width / 2, window.innerWidth - width - 8)), top: at.y + 6 }}
+          >
+            {children}
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }
 

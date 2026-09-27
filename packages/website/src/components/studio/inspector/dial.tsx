@@ -3,7 +3,7 @@ import { ColorControl, Slider, Toggle } from 'dialkit';
 import { createContext, type ReactNode, useContext } from 'react';
 import { DiceIcon, MinusIcon, PlusIcon } from '../icons.tsx';
 import { MAX_SEED, rollSeed } from '../seed.ts';
-import { cx } from '../ui.tsx';
+import { cx, InfoTip } from '../ui.tsx';
 
 export const DialThemeContext = createContext<'light' | 'dark'>('light');
 
@@ -21,25 +21,36 @@ export function DialScope({ children, className }: { children: ReactNode; classN
   );
 }
 
-/** A switch that reveals its nested controls while on — the pattern every effect uses. */
+/** A switch that reveals its nested controls while on — the pattern every effect uses. `info` goes in a tooltip by its label. */
 export function ToggleGroup({
   label,
   checked,
   onChange,
   children,
   trailing,
+  info,
 }: {
   label: string;
   checked: boolean;
   onChange: (v: boolean) => void;
   children?: ReactNode;
   trailing?: ReactNode;
+  info?: ReactNode;
 }) {
+  // DialKit types the label as a string, but renders it as it is: the ⓘ sits right after the name.
+  const title = info ? (
+    <>
+      {label}
+      <InfoTip label={`About ${label}`}>{info}</InfoTip>
+    </>
+  ) : (
+    label
+  );
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center gap-1">
         <div className="min-w-0 flex-1">
-          <Toggle label={label} checked={checked} onChange={onChange} />
+          <Toggle label={title as string} checked={checked} onChange={onChange} />
         </div>
         {trailing}
       </div>

@@ -44,7 +44,7 @@ export function PluginsPanel({ settings, set }: { settings: UrlState; set: SetSe
         — each is made with <code>createPlugin</code>, and its controls come from the params it declares. They're here to show what plugins
         can do, so Export and Ask an agent leave them out.
       </Hint>
-      <DialScope className="mt-2 flex flex-col gap-3">
+      <DialScope className="mt-2 flex flex-col gap-1.5">
         <div className="flex flex-col gap-1">
           <SeedControl value={settings.seed} onChange={(v) => set('seed', v)} />
           <Hint>
@@ -93,41 +93,39 @@ function PluginControls({
   const changed = Object.keys(options).length > 0;
 
   return (
-    <div className="flex flex-col gap-1">
-      <ToggleGroup
-        label={factory.label}
-        checked={enabled}
-        onChange={onToggle}
-        trailing={
-          enabled && changed ? (
-            <SmallIconButton label={`Reset ${factory.label}`} onClick={() => onOptions({})}>
-              <ResetIcon size={12} />
-            </SmallIconButton>
-          ) : undefined
-        }
-      >
-        {hasParams && (
-          <>
-            {presets.length > 0 && (
-              <div className="flex flex-wrap gap-1 py-0.5">
-                <Chip selected={!changed} onClick={() => onOptions({})}>
-                  Default
+    <ToggleGroup
+      label={factory.label}
+      info={factory.description}
+      checked={enabled}
+      onChange={onToggle}
+      trailing={
+        enabled && changed ? (
+          <SmallIconButton label={`Reset ${factory.label}`} onClick={() => onOptions({})}>
+            <ResetIcon size={12} />
+          </SmallIconButton>
+        ) : undefined
+      }
+    >
+      {hasParams && (
+        <>
+          {presets.length > 0 && (
+            <div className="flex flex-wrap gap-1 py-0.5">
+              <Chip selected={!changed} onClick={() => onOptions({})}>
+                Default
+              </Chip>
+              {presets.map(([name, preset]) => (
+                <Chip key={name} selected={changed && same(options, factory.changed(preset))} onClick={() => change(preset)}>
+                  {name}
                 </Chip>
-                {presets.map(([name, preset]) => (
-                  <Chip key={name} selected={changed && same(options, factory.changed(preset))} onClick={() => change(preset)}>
-                    {name}
-                  </Chip>
-                ))}
-              </div>
-            )}
-            {Object.entries(params).map(([key, param]) => (
-              <ParamControl key={key} name={key} param={param} value={values[key]} onChange={(v) => change({ ...values, [key]: v })} />
-            ))}
-          </>
-        )}
-      </ToggleGroup>
-      {factory.description && <Hint>{factory.description}</Hint>}
-    </div>
+              ))}
+            </div>
+          )}
+          {Object.entries(params).map(([key, param]) => (
+            <ParamControl key={key} name={key} param={param} value={values[key]} onChange={(v) => change({ ...values, [key]: v })} />
+          ))}
+        </>
+      )}
+    </ToggleGroup>
   );
 }
 

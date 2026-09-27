@@ -35,7 +35,7 @@ import {
 import { CheckIcon, ChevronDownIcon, CloseIcon, WarningIcon } from './icons.tsx';
 import { playbackShortcut, useShortcuts } from './shortcuts.ts';
 import type { LoadedFont, SetSetting } from './state.ts';
-import { Transport } from './Transport.tsx';
+import { LOOP_HOLD_MS, Transport } from './Transport.tsx';
 import { cx, GlyphKey, IconButton, Popover, Spinner } from './ui.tsx';
 import { ZoomStage } from './ZoomStage.tsx';
 
@@ -264,6 +264,9 @@ export function GlyphWorkspace({
   const animResult: PipelineResult | GeometryPipelineResult | null = pipeline === 'geometry' ? geoResult : result;
   const [animPlaying, setAnimPlaying] = useState(true);
   const [animTime, setAnimTime] = useState(0);
+  const [animLoop, setAnimLoop] = useState(false);
+  const animTimeRef = useRef(animTime);
+  animTimeRef.current = animTime;
   const prevAnimResult = useRef(animResult);
   // Replay from the start whenever the active result changes.
   if (prevAnimResult.current !== animResult) {
@@ -288,26 +291,36 @@ export function GlyphWorkspace({
 
   const animStageActive = stageValue === 'animation' || finalActive;
 
+  // Looping, it holds the last frame a moment, then starts over.
   useEffect(() => {
     if (!animPlaying || !animStageActive || totalDuration <= 0) return;
     let lastTs: number | null = null;
+    let heldSince: number | null = null;
     let raf: number;
     const tick = (ts: number) => {
       if (lastTs !== null) {
-        const dt = (ts - lastTs) / 1000;
-        setAnimTime((prev) => Math.min(prev + dt, totalDuration));
+        const prev = animTimeRef.current;
+        if (animLoop && prev >= totalDuration) {
+          heldSince ??= ts;
+          if (ts - heldSince >= LOOP_HOLD_MS) {
+            heldSince = null;
+            setAnimTime(0);
+          }
+        } else {
+          setAnimTime(Math.min(prev + (ts - lastTs) / 1000, totalDuration));
+        }
       }
       lastTs = ts;
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [animPlaying, totalDuration, animStageActive]);
+  }, [animPlaying, totalDuration, animStageActive, animLoop]);
 
-  // Stop at the end of the timeline.
+  // Stop at the end of the timeline, unless looping.
   useEffect(() => {
-    if (animPlaying && totalDuration > 0 && animTime >= totalDuration) setAnimPlaying(false);
-  }, [animPlaying, animTime, totalDuration]);
+    if (animPlaying && !animLoop && totalDuration > 0 && animTime >= totalDuration) setAnimPlaying(false);
+  }, [animPlaying, animLoop, animTime, totalDuration]);
 
   const playPause = useCallback(() => {
     setAnimTime((t) => (t >= totalDuration ? 0 : t));
@@ -495,9 +508,10 @@ export function GlyphWorkspace({
           time={animTime}
           duration={totalDuration}
           playing={animPlaying}
+          loop={animLoop}
           disabled={!animStageActive || !animResult}
           onPlayPause={playPause}
-          onRestart={() => seekAnim(0)}
+          onLoopChange={setAnimLoop}
           onSeek={seekAnim}
         />
 

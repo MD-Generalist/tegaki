@@ -1,14 +1,18 @@
 import type { ReactNode } from 'react';
-import { PauseIcon, PlayIcon, RestartIcon } from './icons.tsx';
+import { LoopIcon, PauseIcon, PlayIcon } from './icons.tsx';
 import { cx, IconButton } from './ui.tsx';
 
-/** Play/pause + scrubber for a seekable timeline. */
+/** How long a looping timeline holds its last frame before it starts over, in ms. */
+export const LOOP_HOLD_MS = 700;
+
+/** Play/pause, a loop toggle and a scrubber for a seekable timeline. */
 export function Transport({
   time,
   duration,
   playing,
+  loop,
   onPlayPause,
-  onRestart,
+  onLoopChange,
   onSeek,
   disabled,
   trailing,
@@ -16,8 +20,10 @@ export function Transport({
   time: number;
   duration: number;
   playing: boolean;
+  /** Whether playback starts over at the end (after {@link LOOP_HOLD_MS}). */
+  loop: boolean;
   onPlayPause: () => void;
-  onRestart: () => void;
+  onLoopChange: (loop: boolean) => void;
   onSeek: (t: number) => void;
   /** Keeps the bar (and the space it takes) with its controls off — for a view with nothing to play. */
   disabled?: boolean;
@@ -30,8 +36,8 @@ export function Transport({
       <IconButton label={playing ? 'Pause (Space)' : 'Play (Space)'} onClick={onPlayPause} disabled={off}>
         {playing ? <PauseIcon size={14} /> : <PlayIcon size={14} />}
       </IconButton>
-      <IconButton label="Back to start" onClick={onRestart} disabled={off}>
-        <RestartIcon size={14} />
+      <IconButton label={loop ? 'Loop: on' : 'Loop: off'} active={loop} onClick={() => onLoopChange(!loop)} disabled={off}>
+        <LoopIcon size={14} />
       </IconButton>
       <input
         type="range"

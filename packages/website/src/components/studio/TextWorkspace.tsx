@@ -14,7 +14,7 @@ import { ChevronDownIcon, ExternalLinkIcon, RestartIcon } from './icons.tsx';
 import { playbackShortcut, useShortcuts } from './shortcuts.ts';
 import type { LoadedFont, SetSetting } from './state.ts';
 import { TextFrame } from './TextFrame.tsx';
-import { Transport } from './Transport.tsx';
+import { LOOP_HOLD_MS, Transport } from './Transport.tsx';
 import { cx, IconButton, Popover, Spinner } from './ui.tsx';
 
 const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
@@ -165,10 +165,12 @@ export function TextWorkspace({
     if (!playing) set('currentTime', displayTime);
   }, [playing, displayTime, set]);
 
-  // rAF playback loop (controlled mode only)
+  // rAF playback loop (controlled mode only). Looping, it holds the last frame a moment, then starts over.
+  const loop = settings.loop;
   useEffect(() => {
     if (timeMode !== 'controlled' || !playing || totalDuration <= 0) return;
     let lastTs: number | null = null;
+    let heldSince: number | null = null;
     let raf: number;
     const tick = (ts: number) => {
       if (lastTs === null) {
@@ -181,14 +183,22 @@ export function TextWorkspace({
       timeRef.current = Math.min(timeRef.current + dt * animSpeed, totalDuration);
       setDisplayTime(timeRef.current);
       if (timeRef.current >= totalDuration) {
-        setPlaying(false);
-        return;
+        if (!loop) {
+          setPlaying(false);
+          return;
+        }
+        heldSince ??= ts;
+        if (ts - heldSince >= LOOP_HOLD_MS) {
+          heldSince = null;
+          timeRef.current = 0;
+          setDisplayTime(0);
+        }
       }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [timeMode, playing, totalDuration, animSpeed]);
+  }, [timeMode, playing, totalDuration, animSpeed, loop]);
 
   const playPause = useCallback(() => {
     if (timeRef.current >= totalDuration) {
@@ -298,8 +308,9 @@ export function TextWorkspace({
             time={displayTime}
             duration={totalDuration}
             playing={playing}
+            loop={loop}
             onPlayPause={playPause}
-            onRestart={() => seek(0)}
+            onLoopChange={(v) => set('loop', v)}
             onSeek={seek}
             trailing={<SpeedBadge speed={animSpeed} />}
           />
