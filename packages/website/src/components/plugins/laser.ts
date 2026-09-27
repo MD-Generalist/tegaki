@@ -107,7 +107,8 @@ export const laserPlugin = createPlugin({
         const allCool = age(stroke.progress) >= cool;
         next({ ...s, style: allCool ? rgba(final) : (t) => rgba(cooled(age(t), cool, beamColor, final)) });
       },
-      ink({ ctx, ink, bounds, fontSize }) {
+      ink({ ctx, bounds, fontSize }) {
+        const ink = ctx.canvas;
         if (glow <= 0 || burn) return;
         const k = ctx.getTransform().a;
         const r = inkRegion(ctx, ink, bounds, 0.2 * fontSize * k + 2);

@@ -198,11 +198,11 @@ A plugin is an object with a `name` and any of these hooks:
 |------|--------|------------|
 | `geometry(path, ctx)` | once per stroke, when the layout changes | moving the ink's points, changing its widths |
 | `paint(stroke, next)` | every frame, for every stroke (drawn or not: `next` paints only what's drawn) | a brush, a texture, a paint of your own |
-| `ink({ ctx, ink, bounds, scale, … })` | every frame, after the strokes | glows, shadows, filters over the finished ink |
+| `ink({ ctx, bounds, frame, … })` | every frame, after the strokes | glows, shadows, filters over the finished ink |
 | `underlay({ ctx, frame, fontSize, color, random })` | every frame, before the ink | guides, stroke-order arrows, paper texture |
 | `overlay({ ctx, frame, fontSize, color, random })` | every frame, after the ink | a pen at the tip, highlights |
 | `onFrame(frame, prev)` | after every frame is painted | sound, events, syncing other UI |
-| `bounds({ strokes, fontSize, scale })` | when the layout changes | reserving room for what you paint outside the ink |
+| `bounds({ strokes, fontSize })` | when the layout changes | reserving room for what you paint outside the ink |
 | `outline(contour, ctx)` | once per glyph, with clip-to-text on | reshaping the letter shapes the ink is clipped to, in step with `geometry` |
 | `steps: { count, fps, idle? }` | not a hook: a setting | redrawing the ink a few ways in turn, over time (see [Drawings over time](#drawings-over-time-steps)) |
 
@@ -210,7 +210,7 @@ The built-in [effects](#effects) are plugins too, and run first, so each hook of
 
 `ctx` is the canvas context, set up so one unit is one CSS px from the top-left of the text box. The engine saves and restores it around every hook. Underlays go on a layer of their own under the finished ink, so clip-to-text doesn't cut them. `color` is the text's color, and `step` is the plugin's current drawing if it has [`steps`](#drawings-over-time-steps) (`0` otherwise). `random(key)` returns a random number generator seeded by the renderer's [`seed`](#seed), so the same key gives the same numbers on every frame and, at the same seed, on every load. `prev` is the frame `onFrame` saw last, or `null` the first time.
 
-`ink` gets a copy of the finished ink (`ink`, a canvas in device px), the `frame` it's of, and `bounds`, the box the ink drawn so far covers in the same px as `ctx` (`ctx.getTransform()` maps it to device px). Work inside `bounds`: outside it the canvas is empty, and a filter or blur costs what it covers.
+`ink` runs once the strokes are painted (and clipped, with clip-to-text): `ctx.canvas` holds the finished ink, in device px, as the `ink` hooks before yours left it, so a shadow cast after a glow includes the glow. Copy the part you read before drawing over it. It also gets the `frame` the ink is of, and `bounds`, the box the ink drawn so far covers in the same px as `ctx` (`ctx.getTransform()` maps it to device px). Work inside `bounds`: outside it the canvas is empty, and a filter or blur costs what it covers.
 
 The canvas only reaches a little past the ink, so anything painted further out is cut off. Return a box (`{ minX, minY, maxX, maxY }`, in the same px) from `bounds` and the canvas grows to hold it. A hook that throws is logged once and skipped, and the rest of the render carries on.
 
@@ -227,7 +227,7 @@ const swell: TegakiPlugin = {
 
 ### Painting strokes
 
-`paint` gets each stroke (`stroke.stroke`, a stroke of [the frame](#engineframeattime) with its `state`, `path` and `progress`) and `next`, which paints it the way the rest of the chain would: the plugins after yours, then the default painter. Change what you pass to `next` (`style`, the stroke's `path`), call it more than once, draw around it, or skip it. `style` is a CSS color, a canvas gradient or pattern, or a function giving the color at each draw progress. `textBox` is the box the text's lines fill, and `scale` is px per font unit. `frame` is the whole frame: its `time` in seconds, and every stroke in it (the rest of the glyph, or when the last stroke ends). With the stroke's `start` and `duration`, `frame.time - (start + duration * t)` is about how long ago the pen passed the point at progress `t`, for ink that dries or fades.
+`paint` gets each stroke (`stroke.stroke`, a stroke of [the frame](#engineframeattime) with its `state`, `path` and `progress`) and `next`, which paints it the way the rest of the chain would: the plugins after yours, then the default painter. Change what you pass to `next` (`style`, the stroke's `path`), call it more than once, draw around it, or skip it. `style` is a CSS color, a canvas gradient or pattern, or a function giving the color at each draw progress. `textBox` is the box the text's lines fill. Each stroke's `place.scale` is px per font unit. `frame` is the whole frame: its `time` in seconds, and every stroke in it (the rest of the glyph, or when the last stroke ends). With the stroke's `start` and `duration`, `frame.time - (start + duration * t)` is about how long ago the pen passed the point at progress `t`, for ink that dries or fades.
 
 `paint` is called for every stroke on every frame, including the ones the pen hasn't reached (their `stroke.state` is `'pending'`), so a plugin can decide for itself what shows when: stamp a whole glyph the moment its first stroke starts, the way a typewriter does, or start from the text written out and rub it away. The default painter paints only what's drawn, so a pending stroke passed on unchanged shows nothing; to show it, pass it on with `state: 'done'` and the `progress` you want. Anything you draw directly, rather than through `next`, should check `stroke.state` first.
 
@@ -398,8 +398,9 @@ The factory also describes the plugin, so a UI can build its controls. The studi
 - `name`, `label`, `description`, `params`, `presets`: as defined.
 - `defaults`: every option at its default.
 - `resolve(input)`: every option set from `input`, which can be anything (JSON from a URL, say). Values that are missing, of the wrong type, or not among a select's options get their defaults, numbers are kept in range, and unknown keys are dropped. The factory resolves the options it's called with the same way.
+- `changed(input)`: just the options in `input` that differ from their defaults, as `resolve` takes them: the part worth saving.
 
-`changedPluginOptions(params, options)` returns just the options that differ from their defaults, the part worth saving. `TegakiPluginFactory` with no type argument is the type of any factory, for a list of several.
+`TegakiPluginFactory` with no type argument is the type of any factory, for a list of several.
 
 ### Variation: `variationPlugin`
 

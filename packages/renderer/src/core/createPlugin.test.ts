@@ -131,6 +131,13 @@ describe('changedPluginOptions', () => {
     expect(changedPluginOptions(params, { size: 5 })).toEqual({ size: 2 });
     expect(changedPluginOptions(params, { mode: 'square' as never })).toEqual({});
   });
+
+  test('a factory tells the changed options of anything, as it resolves them', () => {
+    const make = createPlugin({ name: 'p', params, setup: () => ({}) });
+    expect(make.changed({ size: 5, arrows: true, bogus: 1 })).toEqual({ size: 2 });
+    expect(make.changed('size=2')).toEqual({});
+    expect(make.changed()).toEqual({});
+  });
 });
 
 describe('the docs example', () => {

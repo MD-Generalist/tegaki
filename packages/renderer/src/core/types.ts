@@ -242,16 +242,18 @@ export interface TegakiStrokePaintContext extends StrokePaint, TegakiPluginConte
    * drawn or not — the rest of the glyph, the whole timeline's length.
    */
   frame: TegakiFrame;
-  /** px per font unit. */
-  scale: number;
 }
 
 /** What an `ink` hook post-processes. */
 export interface TegakiInkContext extends TegakiPluginContext {
-  /** The canvas context, in text-box px like the other hooks'. Draw with `setTransform(1, 0, 0, 1, 0, 0)` to work in device pixels. */
+  /**
+   * The canvas context, in text-box px like the other hooks'. Its canvas
+   * (`ctx.canvas`) holds the finished ink — strokes and fallback text,
+   * clipped to the text if that's on — as the `ink` hooks before this one
+   * left it. Draw with `setTransform(1, 0, 0, 1, 0, 0)` to work in device
+   * pixels. Copy what you read before drawing over it.
+   */
   ctx: CanvasRenderingContext2D;
-  /** A copy of the finished ink (strokes and fallback text, clipped to the text if that's on), in device pixels, the size of the canvas. */
-  ink: HTMLCanvasElement;
   /**
    * The box the ink drawn so far covers, in text-box px (`ctx.getTransform()`
    * maps it to device pixels); `null` before anything is drawn. Work inside
@@ -259,8 +261,6 @@ export interface TegakiInkContext extends TegakiPluginContext {
    * what the canvas measures, not what the ink does.
    */
   bounds: Box | null;
-  /** px per font unit. */
-  scale: number;
   /** The frame the ink is of: when each stroke was drawn, where the pens are. */
   frame: TegakiFrame;
 }
@@ -271,8 +271,6 @@ export interface TegakiBoundsContext {
   strokes: readonly PlacedStroke[];
   /** Font size in px. */
   fontSize: number;
-  /** px per font unit. */
-  scale: number;
 }
 
 /**

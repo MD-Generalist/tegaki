@@ -1,5 +1,5 @@
 import { ColorControl, SelectControl, Slider, Toggle } from 'dialkit';
-import { changedPluginOptions, type TegakiPluginParam, type TegakiPluginParams } from 'tegaki/core';
+import type { TegakiPluginParam, TegakiPluginParams } from 'tegaki/core';
 import { normalizePluginIds, type PluginOptions, SHOWCASE_PLUGINS, type ShowcasePlugin } from '../../plugins/index.ts';
 import type { UrlState } from '../../url-state.ts';
 import { ResetIcon } from '../icons.tsx';
@@ -88,7 +88,7 @@ function PluginControls({
   const params: TegakiPluginParams = factory.params;
   const values: PluginOptions = factory.resolve(options);
   const presets = Object.entries(factory.presets as Record<string, PluginOptions>);
-  const change = (next: PluginOptions) => onOptions(changedPluginOptions(params, next));
+  const change = (next: PluginOptions) => onOptions(factory.changed(next));
   const hasParams = Object.keys(params).length > 0;
   const changed = Object.keys(options).length > 0;
 
@@ -114,7 +114,7 @@ function PluginControls({
                   Default
                 </Chip>
                 {presets.map(([name, preset]) => (
-                  <Chip key={name} selected={changed && same(options, changedPluginOptions(params, preset))} onClick={() => change(preset)}>
+                  <Chip key={name} selected={changed && same(options, factory.changed(preset))} onClick={() => change(preset)}>
                     {name}
                   </Chip>
                 ))}

@@ -125,7 +125,8 @@ export const neonPlugin = createPlugin({
         next({ ...s, style: rgba(mix(OFF, lit, b)), stroke: { ...stroke, path: t.tube } });
         if (b > 0.3) next({ ...s, style: rgba(mix(lit, WHITE, 0.6 * b)), stroke: { ...stroke, path: t.core, nibs: [] } });
       },
-      ink({ ctx, ink, bounds, fontSize }) {
+      ink({ ctx, bounds, fontSize }) {
+        const ink = ctx.canvas;
         if (glow <= 0) return;
         const k = ctx.getTransform().a;
         const reach = 0.35 * fontSize * k * glow;
@@ -134,12 +135,13 @@ export const neonPlugin = createPlugin({
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
-        // Two glows under the tubes: a tight bright one and a wide faint one.
-        ctx.globalCompositeOperation = 'destination-over';
+        // Two glows under the tubes, a tight bright one and a wide faint one —
+        // both taken from the tubes before either is drawn onto the canvas.
         const tight = shrunk(near(1, 1), ink, r, Math.max(2, 0.05 * fontSize * k * glow));
+        const wide = shrunk(far(1, 1), ink, r, Math.max(3, 0.16 * fontSize * k * glow));
+        ctx.globalCompositeOperation = 'destination-over';
         ctx.globalAlpha = glow;
         ctx.drawImage(tight.canvas, 0, 0, tight.w, tight.h, r.x, r.y, r.w, r.h);
-        const wide = shrunk(far(1, 1), ink, r, Math.max(3, 0.16 * fontSize * k * glow));
         ctx.globalAlpha = 0.8 * glow;
         ctx.drawImage(wide.canvas, 0, 0, wide.w, wide.h, r.x, r.y, r.w, r.h);
       },

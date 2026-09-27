@@ -198,16 +198,15 @@ export type StrokeHead = PathSample;
 
 /**
  * A stroke as the bundle has it, in CSS px at `place`: its subdivided
- * polyline, each point as wide as the bundle says (times `strokeScale`,
- * clip-to-text's width multiplier). A point's `t` is the draw progress at
+ * polyline, each point as wide as the bundle says. A point's `t` is the draw progress at
  * which the pen reaches it. A dot — one point, or points that all coincide —
  * is a path of one point. `null` for a stroke with no points.
  */
-export function rawStrokePath(stroke: Stroke, sub: SubdividedStroke, place: GlyphPlacement, strokeScale = 1): StrokePath | null {
+export function rawStrokePath(stroke: Stroke, sub: SubdividedStroke, place: GlyphPlacement): StrokePath | null {
   const pts = stroke.p;
   if (pts.length === 0) return null;
   const { scale } = place;
-  const ws = scale * strokeScale;
+  const ws = scale;
   const px = (x: number) => place.x + x * scale;
   const py = (y: number) => place.y + (y + place.ascender) * scale;
   const p0 = pts[0]!;
@@ -296,8 +295,6 @@ export interface StrokeGeometryContext {
   rawPath: StrokePath;
   /** Where its glyph sits: px from font units are `x + fx * scale`, `y + (fy + ascender) * scale`. */
   place: GlyphPlacement;
-  /** px of ink width per font unit of the bundle's widths: `place.scale` times clip-to-text's width multiplier. */
-  widthScale: number;
   /** A number fixed per glyph. */
   seed: number;
   /** Where along the bundle's own points draw progress `t` falls: `0` at the first point, `1` at the second, and so on. */
@@ -315,8 +312,6 @@ export interface PlaceContext {
   reshape?(path: StrokePath, ctx: StrokeGeometryContext): StrokePath;
   /** The subdivision the canvas draws each stroke with. Default: the raw polyline. */
   getSubdivided?(stroke: Stroke): SubdividedStroke;
-  /** Clip-to-text's width multiplier. Default `1`. */
-  strokeScale?: number;
 }
 
 /** The box a placed stroke's ink covers once drawn — its path and its nib stamps. `null` for an empty path. */
@@ -337,7 +332,6 @@ export function strokeInkBounds(stroke: Pick<PlacedStroke, 'path' | 'nibs'>): Bo
 export function placeStrokes(instances: readonly StrokeInstance[], ctx: PlaceContext): PlacedStroke[] {
   const out: PlacedStroke[] = [];
   const subdivide = ctx.getSubdivided ?? ((s: Stroke) => subdivideStroke(s, Infinity));
-  const strokeScale = ctx.strokeScale ?? 1;
   // Instances come grouped by entry: place each glyph once.
   let entryIndex = -1;
   let place: (GlyphPlacement & { seed: number }) | null = null;
@@ -348,14 +342,13 @@ export function placeStrokes(instances: readonly StrokeInstance[], ctx: PlaceCon
     }
     if (!place) continue;
     const sub = subdivide(instance.stroke);
-    const rawPath = rawStrokePath(instance.stroke, sub, place, strokeScale);
+    const rawPath = rawStrokePath(instance.stroke, sub, place);
     if (!rawPath) continue;
     const path = ctx.reshape
       ? ctx.reshape(rawPath, {
           stroke: instance,
           rawPath,
           place,
-          widthScale: place.scale * strokeScale,
           seed: place.seed,
           bundleIndexAt: (t) => {
             if (sub.totalLen <= 0) return 0;

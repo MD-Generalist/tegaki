@@ -125,8 +125,7 @@ describe('sampleStroke', () => {
 
 describe('rawStrokePath', () => {
   const sub = subdivideStroke(two.s[0]!, Infinity);
-  const pathOf = (g: TegakiGlyphData, si: number, at = place, strokeScale = 1) =>
-    rawStrokePath(g.s[si]!, subdivideStroke(g.s[si]!, Infinity), at, strokeScale)!;
+  const pathOf = (g: TegakiGlyphData, si: number, at = place) => rawStrokePath(g.s[si]!, subdivideStroke(g.s[si]!, Infinity), at)!;
 
   test('the head sits where the ink ends, heading along the stroke', () => {
     const head = rawStrokePath(two.s[0]!, sub, { x: 10, y: 20, scale: 2, ascender: 0 })!.pointAt(0.5);
@@ -148,8 +147,8 @@ describe('rawStrokePath', () => {
     expect(head.angle).toBeCloseTo(0, 6);
   });
 
-  test("widths are the bundle's, scaled by the placement and clip-to-text's stroke scale", () => {
-    expect(pathOf(two, 0, { ...place, scale: 2 }, 1.5).points.map((p) => p.width)).toEqual([30, 30]);
+  test("widths are the bundle's, scaled by the placement", () => {
+    expect(pathOf(two, 0, { ...place, scale: 2 }).points.map((p) => p.width)).toEqual([20, 20]);
   });
 
   test('a dot is a single point, and its own head', () => {

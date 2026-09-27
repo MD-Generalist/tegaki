@@ -40,21 +40,15 @@ export const shadowPlugin = createPlugin({
     const reach = Math.max(Math.abs(x), Math.abs(y)) + 1.5 * blur;
     return {
       bounds: ({ strokes, fontSize }) => expandBox(unionBoxes(strokes.map((s) => s.path.bounds())), fontSize * reach),
-      ink({ ctx, ink, bounds, fontSize }) {
-        if (opacity <= 0) return;
+      ink({ ctx, bounds, fontSize }) {
+        if (opacity <= 0 && bevel <= 0) return;
+        const ink = ctx.canvas;
         const k = ctx.getTransform().a;
         const r = inkRegion(ctx, ink, bounds, fontSize * reach * k + 2);
         if (!r) return;
-        const shade = silhouette(scratch(r.w, r.h), ink, r, {
-          color,
-          blur: blur * fontSize * k,
-          dx: x * fontSize * k,
-          dy: y * fontSize * k,
-        });
         ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.globalCompositeOperation = 'destination-over';
-        ctx.globalAlpha = opacity;
-        ctx.drawImage(shade, 0, 0, r.w, r.h, r.x, r.y, r.w, r.h);
+        // The bevel first, on the ink itself; it changes colors, not coverage,
+        // so the shadow cast from the canvas after it is the ink's shape.
         if (bevel > 0) {
           const d = Math.max(1, 0.012 * fontSize * k);
           ctx.globalAlpha = bevel;
@@ -62,6 +56,16 @@ export const shadowPlugin = createPlugin({
           ctx.drawImage(rim(edge(r.w, r.h), ink, r, d, '#ffffff'), 0, 0, r.w, r.h, r.x, r.y, r.w, r.h);
           ctx.drawImage(rim(edge(r.w, r.h), ink, r, -d, '#000000'), 0, 0, r.w, r.h, r.x, r.y, r.w, r.h);
         }
+        if (opacity <= 0) return;
+        const shade = silhouette(scratch(r.w, r.h), ink, r, {
+          color,
+          blur: blur * fontSize * k,
+          dx: x * fontSize * k,
+          dy: y * fontSize * k,
+        });
+        ctx.globalCompositeOperation = 'destination-over';
+        ctx.globalAlpha = opacity;
+        ctx.drawImage(shade, 0, 0, r.w, r.h, r.x, r.y, r.w, r.h);
       },
     };
   },

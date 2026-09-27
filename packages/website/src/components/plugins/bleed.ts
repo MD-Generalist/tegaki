@@ -46,7 +46,8 @@ export const bleedPlugin = createPlugin({
     let tile: Uint8ClampedArray | null = null;
     return {
       bounds: ({ strokes, fontSize }) => expandBox(unionBoxes(strokes.map((s) => s.path.bounds())), fontSize * spread * 2),
-      ink({ ctx, ink, bounds, color, fontSize, random }) {
+      ink({ ctx, bounds, color, fontSize, random }) {
+        const ink = ctx.canvas;
         if (amount <= 0) return;
         const k = ctx.getTransform().a;
         const blur = spread * fontSize * k;

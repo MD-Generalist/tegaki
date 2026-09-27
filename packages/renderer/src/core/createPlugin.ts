@@ -98,6 +98,8 @@ export interface TegakiPluginFactory<P extends TegakiPluginParams = any> {
   readonly presets: Readonly<Record<string, Partial<TegakiPluginOptions<P>>>>;
   /** Every param set from `input`: what's missing, of the wrong type or not an option takes its default, numbers are kept in range, unknown keys are dropped. */
   resolve(input?: unknown): TegakiPluginOptions<P>;
+  /** Just the options in `input` that differ from their defaults, as {@link resolve} takes them — the part worth saving (in a URL, say). */
+  changed(input?: unknown): Partial<TegakiPluginOptions<P>>;
 }
 
 /**
@@ -144,6 +146,8 @@ export function createPlugin<const P extends TegakiPluginParams = {}>(definition
     defaults,
     presets: definition.presets ?? {},
     resolve,
+    changed: (input?: unknown) =>
+      input && typeof input === 'object' ? changedPluginOptions(params, input as Record<string, unknown>) : {},
   }) as TegakiPluginFactory<P>;
 }
 

@@ -39,9 +39,9 @@ export const grainPlugin = createPlugin({
     let texture: { k: number; canvas: HTMLCanvasElement } | null = null;
     let pattern: { ctx: CanvasRenderingContext2D; canvas: HTMLCanvasElement; pattern: CanvasPattern | null } | null = null;
     return {
-      ink({ ctx, ink, bounds, random }) {
+      ink({ ctx, bounds, random }) {
         if (amount <= 0) return;
-        const r = inkRegion(ctx, ink, bounds, 2);
+        const r = inkRegion(ctx, ctx.canvas, bounds, 2);
         if (!r) return;
         // Cells of `size` CSS px, in device px (the ink hook's transform carries the pixel ratio).
         const k = size * ctx.getTransform().a;

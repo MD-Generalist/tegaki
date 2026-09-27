@@ -141,7 +141,6 @@ describe('paint plugins', () => {
       lineCap: 'round',
       color: '#123',
       fontSize: 100,
-      scale: 1,
       textBox: { minX: 0, minY: 0, maxX: 100, maxY: 20 },
       frame: { time: 1, strokes: [frame], active: [] },
       random: (k) => seededRandom(0, k),
@@ -205,9 +204,9 @@ describe('paintWith', () => {
 describe('glow', () => {
   test('bounds reach past the ink by the blur and offset', () => {
     const effects = resolveEffects({ glow: { radius: 10, offsetX: 5, offsetY: -20 } });
-    const strokes = placed(effects);
+    const strokes = placed(effects, { x: 0, y: 0, scale: 0.5, ascender: 0, seed: 0 });
     const glow = effectPlugins(effects).find((p) => p.name === 'glow')!;
-    const box = glow.bounds!({ strokes, fontSize: 100, scale: 0.5 })!;
+    const box = glow.bounds!({ strokes, fontSize: 100 })!;
     const ink = strokeInkBounds(strokes[0]!)!;
     expect(box.minX).toBeCloseTo(ink.minX - 20, 6);
     expect(box.maxY).toBeCloseTo(ink.maxY + 20, 6);
@@ -240,7 +239,6 @@ describe('glow per stroke', () => {
       lineCap: 'round',
       color: '#123',
       fontSize: 100,
-      scale: 1,
       textBox: { minX: 0, minY: 0, maxX: 100, maxY: 20 },
       frame: { time: 1, strokes: [frame], active: [] },
       random: (k) => seededRandom(0, k),

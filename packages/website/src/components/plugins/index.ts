@@ -5,7 +5,6 @@
 
 import {
   boilPlugin,
-  changedPluginOptions,
   type TegakiPlugin,
   type TegakiPluginFactory,
   type TegakiPluginOptions,
@@ -111,7 +110,7 @@ export function normalizePluginOptions(input: unknown): PluginOptionsState {
   for (const [id, options] of Object.entries(input)) {
     const plugin = BY_ID.get(id);
     if (!plugin || !options || typeof options !== 'object') continue;
-    const changed = changedPluginOptions(plugin.factory.params, options);
+    const changed = plugin.factory.changed(options);
     if (Object.keys(changed).length > 0) out[id] = changed;
   }
   return out;

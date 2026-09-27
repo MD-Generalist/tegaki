@@ -257,7 +257,6 @@ export class TegakiEngine {
   /** What `_maskCanvas` was last drawn from (see `_render`). */
   private _maskKey: unknown[] | null = null;
   /** A copy of the finished ink, for the plugins' `ink` hooks. */
-  private _inkCanvas: HTMLCanvasElement | null = null;
   /** Ink clip-to-text leaves alone (the paint context's `unclipped`), laid under the clipped ink. */
   private _unclippedCanvas: HTMLCanvasElement | null = null;
   /**
@@ -964,7 +963,6 @@ export class TegakiEngine {
     this._strokeCacheKey = '';
     this._maskCanvas = null;
     this._maskKey = null;
-    this._inkCanvas = null;
     this._underlayCanvas = null;
     this._unclippedCanvas = null;
     this._placed = null;
@@ -1647,7 +1645,7 @@ export class TegakiEngine {
       }
       // The ink as the plugins reshape it (a wobble moves it), and what they
       // paint outside it (+1px for antialiasing).
-      const pluginBox = this._pluginBounds(fontSize, scale);
+      const pluginBox = this._pluginBounds(fontSize);
       if (pluginBox) {
         ink.minX = Math.min(ink.minX, pluginBox.minX - 1);
         ink.minY = Math.min(ink.minY, pluginBox.minY - 1);
@@ -1898,7 +1896,7 @@ export class TegakiEngine {
    * The box the ink covers once drawn, as the plugins reshape it, together
    * with the plugins' `bounds`, in text-box px; null with no strokes.
    */
-  private _pluginBounds(fontSize: number, scale: number): Box | null {
+  private _pluginBounds(fontSize: number): Box | null {
     const plugins = this._allPlugins();
     this._placedStrokes();
     const placed = this._placed;
@@ -1911,7 +1909,7 @@ export class TegakiEngine {
       const strokes = this._placedStrokes(steps);
       for (const stroke of strokes) boxes.push(strokeInkBounds(stroke));
       for (const plugin of plugins) {
-        if (plugin.bounds) this._runHook(plugin, 'bounds', () => boxes.push(plugin.bounds!({ strokes, fontSize, scale })));
+        if (plugin.bounds) this._runHook(plugin, 'bounds', () => boxes.push(plugin.bounds!({ strokes, fontSize })));
       }
     }
     const box = unionBoxes(boxes);
@@ -1934,28 +1932,15 @@ export class TegakiEngine {
     ctx: CanvasRenderingContext2D,
     plugins: readonly TegakiPlugin[],
     fontSize: number,
-    scale: number,
     color: string,
     bounds: Box | null,
     frame: TegakiFrame,
   ): void {
-    const canvas = this._canvasEl;
-    if (!this._inkCanvas) this._inkCanvas = document.createElement('canvas');
-    const ink = this._inkCanvas;
-    if (ink.width !== canvas.width || ink.height !== canvas.height) {
-      ink.width = canvas.width;
-      ink.height = canvas.height;
-    }
-    const inkCtx = ink.getContext('2d')!;
-    inkCtx.globalCompositeOperation = 'copy';
-    inkCtx.drawImage(canvas, 0, 0);
     const steps = this._steps.steps;
     const context = {
       ctx,
-      ink,
       bounds,
       fontSize,
-      scale,
       color,
       frame,
       random: (key: string | number) => seededRandom(this._seed, key),
@@ -2167,7 +2152,7 @@ export class TegakiEngine {
           const stroke = strokes[si]!;
           // The built-in effects paint only what's drawn: without a plugin's `paint`, a pending stroke has nothing to show.
           if (stroke.state === 'pending' && !paintsAhead) continue;
-          paint({ ctx, unclipped, stroke, style: color, lineCap: font.lineCap, color, fontSize, scale, textBox, frame, random });
+          paint({ ctx, unclipped, stroke, style: color, lineCap: font.lineCap, color, fontSize, textBox, frame, random });
           if (stroke.state !== 'pending' || paintsAhead) inkBoxes.push(this._inkBox(stroke));
         }
       } else if (currentTime >= entry.offset + entry.duration) {
@@ -2331,7 +2316,7 @@ export class TegakiEngine {
     }
 
     // --- Plugins: the finished ink (the built-in glow), then underlays, overlays, onFrame ---
-    if (plugins.some((p) => p.ink)) this._renderInk(ctx, plugins, fontSize, scale, color, drawn, frame);
+    if (plugins.some((p) => p.ink)) this._renderInk(ctx, plugins, fontSize, color, drawn, frame);
     if (plugins.some((p) => p.underlay || p.overlay || p.onFrame)) this._renderPlugins(ctx, plugins, frame, fontSize, color);
   }
 }

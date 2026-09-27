@@ -1,7 +1,9 @@
 import type { ResolvedEffect } from '../lib/effects.ts';
+import { paintStroke } from '../lib/paintStroke.ts';
 import { seededRandom } from '../lib/random.ts';
 import type { SubdividedStroke } from '../lib/strokeCache.ts';
 import { defaultStrokeEasing } from '../lib/strokeEffects.ts';
+import type { StrokePath } from '../lib/strokePath.ts';
 import {
   type ActiveStroke,
   placeStrokes,
@@ -15,7 +17,7 @@ import type { TimelineEntry } from '../lib/timeline.ts';
 import type { LineCap, TegakiGlyphData } from '../types.ts';
 import { effectPlugins } from './effectPlugins.ts';
 import { paintWith, reshapeWith } from './plugins.ts';
-import type { TegakiPlugin } from './types.ts';
+import type { TegakiPlugin, TegakiStrokePaintContext } from './types.ts';
 
 type Stroke = TegakiGlyphData['s'][number];
 
@@ -92,10 +94,20 @@ export function drawGlyph(
     placeEntry: () => ({ x: pos.x, y: pos.y, scale, ascender: pos.ascender, seed }),
     reshape: reshapeWith(all, { fontSize: pos.fontSize, random }, onError),
     getSubdivided,
-    strokeScale,
   });
 
-  const paint = paintWith(all, onError);
+  // Clip-to-text's width multiplier is how the ink is painted, not the stroke's own width.
+  const widened = new WeakMap<StrokePath, StrokePath>();
+  const painter =
+    strokeScale === 1
+      ? paintStroke
+      : (s: TegakiStrokePaintContext) => {
+          if (s.stroke.state === 'pending') return;
+          let path = widened.get(s.stroke.path);
+          if (!path) widened.set(s.stroke.path, (path = s.stroke.path.map((p) => ({ ...p, width: p.width * strokeScale }))));
+          paintStroke({ ...s, stroke: { ...s.stroke, path } });
+        };
+  const paint = paintWith(all, onError, painter);
   const textBox = {
     minX: pos.x,
     minY: pos.y,
@@ -119,7 +131,6 @@ export function drawGlyph(
       lineCap,
       color,
       fontSize: pos.fontSize,
-      scale,
       textBox,
       frame,
       random,

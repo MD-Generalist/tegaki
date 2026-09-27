@@ -47,13 +47,13 @@ function pressureWidthPlugin(effects: ResolvedEffect[]): TegakiPlugin {
   return {
     name: 'pressureWidth',
     geometry(path, g) {
-      const min = 0.5 * g.widthScale;
+      const min = 0.5 * g.place.scale;
       // A dot's width doesn't vary within it.
       if (path.points.length === 1) return path.map((p) => ({ ...p, width: Math.max(p.width, min) }));
       const pts = g.stroke.stroke.p;
       let sum = 0;
       for (const q of pts) sum += q[2]!;
-      const mean = Math.max(sum / pts.length, 0.5) * g.widthScale;
+      const mean = Math.max(sum / pts.length, 0.5) * g.place.scale;
       if (strength === 0) return path.map((p) => ({ ...p, width: mean }));
       return path.map((p) => ({ ...p, width: Math.max(mean + (p.width - mean) * strength, min) }));
     },
@@ -160,9 +160,10 @@ function passesFor(effects: ResolvedEffect[]): (color: string, fontSize: number,
  */
 function glowPlugin(effects: ResolvedEffect[], clipText: boolean): TegakiPlugin {
   const passes = passesFor(effects);
-  const bounds: TegakiPlugin['bounds'] = ({ strokes, fontSize, scale }) => {
+  const bounds: TegakiPlugin['bounds'] = ({ strokes, fontSize }) => {
     let reach = 0;
-    for (const g of passes('', fontSize, scale)) reach = Math.max(reach, g.blur + Math.max(Math.abs(g.dx), Math.abs(g.dy)));
+    for (const g of passes('', fontSize, strokes[0]?.place.scale ?? 0))
+      reach = Math.max(reach, g.blur + Math.max(Math.abs(g.dx), Math.abs(g.dy)));
     return expandBox(unionBoxes(strokes.map(strokeInkBounds)), reach);
   };
   return clipText ? { name: 'glow', bounds, ink: inkGlow(passes) } : { name: 'glow', bounds, paint: strokeGlow(passes) };
@@ -180,7 +181,7 @@ function strokeGlow(passes: ReturnType<typeof passesFor>): NonNullable<TegakiPlu
     } else {
       let sum = 0;
       for (const q of stroke.stroke.p) sum += q[2]!;
-      const width = Math.max(sum / stroke.stroke.p.length, 0.5) * s.scale;
+      const width = Math.max(sum / stroke.stroke.p.length, 0.5) * stroke.place.scale;
       const nibs = stroke.nibs.map((nib) => {
         const f = stroke.path.pointAt(nib.t).width / width;
         return { ...nib, rx: nib.rx * f, ry: nib.ry * f };
@@ -191,7 +192,7 @@ function strokeGlow(passes: ReturnType<typeof passesFor>): NonNullable<TegakiPlu
     return copy;
   };
   return (s, next) => {
-    const glows = passes(s.color, s.fontSize, s.scale);
+    const glows = passes(s.color, s.fontSize, s.stroke.place.scale);
     if (glows.length > 0) {
       const copy = copyOf(s);
       const stroke = { ...s.stroke, ...copy };
@@ -220,6 +221,7 @@ const OFFSTAGE = 1e5;
  * a fraction of the pixels.
  */
 function inkGlow(passes: ReturnType<typeof passesFor>): NonNullable<TegakiPlugin['ink']> {
+  let source: HTMLCanvasElement | null = null;
   let tint: HTMLCanvasElement | null = null;
   let blur: HTMLCanvasElement | null = null;
   const fit = (c: HTMLCanvasElement, w: number, h: number) => {
@@ -228,8 +230,9 @@ function inkGlow(passes: ReturnType<typeof passesFor>): NonNullable<TegakiPlugin
       c.height = Math.max(c.height, h);
     }
   };
-  return ({ ctx, ink, bounds, color, fontSize, scale }: TegakiInkContext) => {
-    const glows = passes(color, fontSize, scale);
+  return ({ ctx, bounds, color, fontSize, frame }: TegakiInkContext) => {
+    const glows = passes(color, fontSize, frame.strokes[0]?.place.scale ?? 0);
+    const ink = ctx.canvas;
     if (!bounds || glows.length === 0) return;
     // A shadow's blur reaches about 3σ = 1.5 × shadowBlur.
     let reach = 0;
@@ -242,8 +245,14 @@ function inkGlow(passes: ReturnType<typeof passesFor>): NonNullable<TegakiPlugin
     const w = x1 - x0;
     const h = y1 - y0;
     if (w <= 0 || h <= 0) return;
+    if (!source) source = document.createElement('canvas');
     if (!tint) tint = document.createElement('canvas');
     if (!blur) blur = document.createElement('canvas');
+    // The ink as it is now: the passes draw on the canvas, and each reads the ink alone.
+    fit(source, w, h);
+    const sctx = source.getContext('2d')!;
+    sctx.globalCompositeOperation = 'copy';
+    sctx.drawImage(ink, x0, y0, w, h, 0, 0, w, h);
     const tctx = tint.getContext('2d')!;
     const bctx = blur.getContext('2d')!;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -258,7 +267,7 @@ function inkGlow(passes: ReturnType<typeof passesFor>): NonNullable<TegakiPlugin
       fit(blur, sw, sh);
       tctx.globalCompositeOperation = 'copy';
       tctx.imageSmoothingEnabled = true;
-      tctx.drawImage(ink, x0, y0, w, h, 0, 0, sw, sh);
+      tctx.drawImage(source, 0, 0, w, h, 0, 0, sw, sh);
       tctx.globalCompositeOperation = 'source-in';
       tctx.fillStyle = g.color;
       tctx.fillRect(0, 0, sw, sh);
