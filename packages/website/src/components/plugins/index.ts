@@ -27,6 +27,7 @@ import { neonPlugin } from './neon.ts';
 import { nibPlugin } from './nib.ts';
 import { paperPlugin } from './paper.ts';
 import { penPlugin } from './pen.ts';
+import { rhythmPlugin } from './rhythm.ts';
 import { shadowPlugin } from './shadow.ts';
 import { shakePlugin } from './shake.ts';
 import { shakyPlugin } from './shaky.ts';
@@ -34,6 +35,7 @@ import { slantPlugin } from './slant.ts';
 import { soundPlugin } from './sound.ts';
 import { sparklePlugin } from './sparkle.ts';
 import { strokeOrderPlugin } from './stroke-order.ts';
+import { sweepPlugin } from './sweep.ts';
 import { typewriterPlugin } from './typewriter.ts';
 import { wetPlugin } from './wet.ts';
 
@@ -45,7 +47,8 @@ export interface ShowcasePlugin {
 }
 
 // Listed in the order they run, which is the order that matters: geometry
-// first, so the painters get the reshaped strokes; underlays bottom-most
+// first, so the painters get the reshaped strokes; the timing hooks in the
+// order they retime, a hand's pace before a sweep or the typewriter replaces it; underlays bottom-most
 // first, overlays top-most last; in the paint chain, whoever sets the color
 // before whoever reads it (Colors, then Wet ink), Ballpoint's pieces before
 // Wet ink times them, and the painters that bring their own color (Graphite,
@@ -60,6 +63,8 @@ export const SHOWCASE_PLUGINS: readonly ShowcasePlugin[] = [
   { id: 'slant', factory: slantPlugin },
   { id: 'shaky', factory: shakyPlugin },
   { id: 'nib', factory: nibPlugin },
+  { id: 'rhythm', factory: rhythmPlugin },
+  { id: 'sweep', factory: sweepPlugin },
   { id: 'paper', factory: paperPlugin },
   { id: 'order', factory: strokeOrderPlugin },
   { id: 'colors', factory: colorsPlugin },

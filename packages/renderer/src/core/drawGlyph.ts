@@ -16,7 +16,7 @@ import {
 import type { TimelineEntry } from '../lib/timeline.ts';
 import type { LineCap, TegakiGlyphData } from '../types.ts';
 import { effectPlugins } from './effectPlugins.ts';
-import { paintWith, reshapeWith } from './plugins.ts';
+import { paintWith, reshapeWith, timingWith } from './plugins.ts';
 import type { TegakiPlugin, TegakiStrokePaintContext } from './types.ts';
 
 type Stroke = TegakiGlyphData['s'][number];
@@ -45,6 +45,7 @@ const linear = (t: number) => t;
  * The strokes go through the same plugins the engine runs — `effects` as the
  * built-in effect plugins, then `plugins` — except the `ink` hooks (the glow
  * among them), which post-process a whole canvas of finished ink, not a glyph.
+ * A `timing` hook retimes the glyph's strokes, in seconds from `localTime` 0.
  *
  * `getSubdivided` returns a shared, cached subdivision of each stroke (in font
  * units, pre-wobble); if omitted, strokes are drawn as the bundle has them.
@@ -90,11 +91,13 @@ export function drawGlyph(
     start: windows[si]!.delay,
     duration: windows[si]!.duration,
   }));
-  const placed = placeStrokes(instances, {
+  const shaped = placeStrokes(instances, {
     placeEntry: () => ({ x: pos.x, y: pos.y, scale, ascender: pos.ascender, seed }),
     reshape: reshapeWith(all, { fontSize: pos.fontSize, random }, onError),
     getSubdivided,
   });
+  // The plugins' `timing`, over the glyph's own strokes.
+  const placed = timingWith(all, { fontSize: pos.fontSize, random }, onError)?.(shaped, glyph.t).strokes ?? shaped;
 
   // Clip-to-text's width multiplier is how the ink is painted, not the stroke's own width.
   const widened = new WeakMap<StrokePath, StrokePath>();

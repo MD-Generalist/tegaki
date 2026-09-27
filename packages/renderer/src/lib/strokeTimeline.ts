@@ -38,6 +38,7 @@ export interface GlyphSlot {
   offset: number;
   duration?: number;
   strokeDelays?: (number | undefined)[];
+  strokeDurations?: (number | undefined)[];
   strokeTimeScale?: number;
 }
 
@@ -52,12 +53,86 @@ export interface StrokeTiming {
 /**
  * When stroke `si` draws, in seconds relative to its glyph's slot: the
  * scheduler's deferred delay if it moved the stroke, else the bundled one,
- * scaled with the bundled duration by stagger's fixed `duration`.
+ * scaled with the bundled duration by stagger's fixed `duration` — unless a
+ * plugin's `timing` set them (`strokeDelays` / `strokeDurations`).
  */
 export function strokeWindow(glyph: TegakiGlyphData, si: number, slot: Omit<GlyphSlot, 'offset'>): { delay: number; duration: number } {
   const stroke = glyph.s[si]!;
   const scale = slot.strokeTimeScale ?? 1;
-  return { delay: slot.strokeDelays?.[si] ?? stroke.d * scale, duration: stroke.a * scale };
+  return { delay: slot.strokeDelays?.[si] ?? stroke.d * scale, duration: slot.strokeDurations?.[si] ?? stroke.a * scale };
+}
+
+/** When a stroke draws: the timeline seconds it starts at, and the seconds it takes. */
+export interface StrokeTime {
+  start: number;
+  duration: number;
+}
+
+/**
+ * `timeline` with its strokes drawn at new times: `times[i]` for
+ * `strokes[i]` (strokes of the timeline, as {@link strokeInstances} lists
+ * them — all of them or some). A glyph with a stroke moved gets the slot its
+ * strokes now span, and each of them its own delay and duration. An entry
+ * with no strokes given (a space, a character drawn from the fallback font, a
+ * glyph the layout doesn't place) keeps its distance from the end of the entry
+ * before it. The timeline then runs `duration` seconds, or — without one — as
+ * long past its last end as it did; never less than to its last end. The same
+ * timeline when nothing moved.
+ */
+export function retimeTimeline(
+  timeline: Timeline,
+  strokes: readonly Pick<StrokeInstance, 'entryIndex' | 'strokeIndex' | 'start' | 'duration'>[],
+  times: readonly StrokeTime[],
+  duration?: number,
+): Timeline {
+  const byEntry = new Map<number, { si: number; start: number; duration: number }[]>();
+  const moved = new Set<number>();
+  for (let i = 0; i < strokes.length; i++) {
+    const s = strokes[i]!;
+    const t = times[i] ?? s;
+    let own = byEntry.get(s.entryIndex);
+    if (!own) byEntry.set(s.entryIndex, (own = []));
+    own.push({ si: s.strokeIndex, start: t.start, duration: t.duration });
+    if (t.start !== s.start || t.duration !== s.duration) moved.add(s.entryIndex);
+  }
+  if (moved.size === 0 && (duration === undefined || duration === timeline.totalDuration)) return timeline;
+
+  const entries: TimelineEntry[] = [];
+  let prevOldEnd: number | null = null;
+  let prevNewEnd = 0;
+  let oldLast = 0;
+  let newLast = 0;
+  for (let ei = 0; ei < timeline.entries.length; ei++) {
+    const entry = timeline.entries[ei]!;
+    const own = byEntry.get(ei);
+    let next = entry;
+    if (own && moved.has(ei)) {
+      let offset = Infinity;
+      let end = -Infinity;
+      for (const t of own) {
+        offset = Math.min(offset, t.start);
+        end = Math.max(end, t.start + t.duration);
+      }
+      const strokeDelays: (number | undefined)[] = [];
+      const strokeDurations: (number | undefined)[] = [];
+      for (const t of own) {
+        strokeDelays[t.si] = t.start - offset;
+        strokeDurations[t.si] = t.duration;
+      }
+      const { strokeTimeScale: _, ...rest } = entry;
+      next = { ...rest, offset, duration: end - offset, strokeDelays, strokeDurations };
+    } else if (!own && prevOldEnd !== null) {
+      const offset = Math.max(0, prevNewEnd + entry.offset - prevOldEnd);
+      if (offset !== entry.offset) next = { ...entry, offset };
+    }
+    entries.push(next);
+    prevOldEnd = entry.offset + entry.duration;
+    prevNewEnd = next.offset + next.duration;
+    oldLast = Math.max(oldLast, prevOldEnd);
+    newLast = Math.max(newLast, prevNewEnd);
+  }
+  const total = duration ?? timeline.totalDuration + (newLast - oldLast);
+  return { entries, totalDuration: Math.max(newLast, total) };
 }
 
 /**

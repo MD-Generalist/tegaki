@@ -88,7 +88,7 @@ The effects are [plugins](#plugins) built into the renderer, run ahead of your o
 
 **Type:** `readonly TegakiPlugin[]`
 
-Code that reshapes or paints the ink, paints under or over it, or runs on every frame drawn: a brush, a pen at the tip, stroke-order arrows, sound. They run after the built-in [effects](#effects). See [Plugins](#plugins). In React, keep the array stable (define it outside the component or memoize it), since a new array redraws the canvas. Plugins are functions, so the Astro component doesn't take them, and `toSVG` leaves them out.
+Code that reshapes, retimes or paints the ink, paints under or over it, or runs on every frame drawn: a brush, a pen at the tip, stroke-order arrows, a typist's pace, sound. They run after the built-in [effects](#effects). See [Plugins](#plugins). In React, keep the array stable (define it outside the component or memoize it), since a new array redraws the canvas. Plugins are functions, so the Astro component doesn't take them. `toSVG` leaves them out, except for when the strokes draw: it plays the timeline their `timing` makes.
 
 ### `seed`
 
@@ -163,7 +163,7 @@ The engine exposes the timeline one stroke at a time. In React, the engine is on
 
 **Type:** `readonly StrokeInstance[]`
 
-Every stroke the text draws, in the order the canvas paints them. Each one has an `id` that stays the same while the timeline does, plus the timeline `entry` it belongs to (character, glyph, position), its `strokeIndex` in the glyph's stroke order, and its `start` and `duration` in seconds. The list is recomputed whenever the timeline is (see `onChangeTimeline`).
+Every stroke the text draws, in the order the canvas paints them. Each one has an `id` that stays the same while the timeline does, plus the timeline `entry` it belongs to (character, glyph, position), its `strokeIndex` in the glyph's stroke order, and its `start` and `duration` in seconds, as the plugins' [`timing`](#retiming-the-strokes-timing) gives them. The list is recomputed whenever the timeline is (see `onChangeTimeline`).
 
 ### `engine.frameAt(time?)`
 
@@ -197,6 +197,7 @@ A plugin is an object with a `name` and any of these hooks:
 | Hook | Called | Use it for |
 |------|--------|------------|
 | `geometry(path, ctx)` | once per stroke, when the layout changes | moving the ink's points, changing its widths |
+| `timing({ strokes, duration, fontSize, random })` | once, when the layout changes | when each stroke draws: a hand's pace, a typewriter's keys, a sweep (see [Retiming the strokes](#retiming-the-strokes-timing)) |
 | `paint(stroke, next)` | every frame, for every stroke (drawn or not: `next` paints only what's drawn) | a brush, a texture, a paint of your own |
 | `ink({ ctx, bounds, frame, … })` | every frame, after the strokes | glows, shadows, filters over the finished ink |
 | `underlay({ ctx, frame, fontSize, color, random })` | every frame, before the ink | guides, stroke-order arrows, paper texture |
@@ -225,11 +226,38 @@ const swell: TegakiPlugin = {
 };
 ```
 
+### Retiming the strokes: `timing`
+
+`timing` decides when each stroke draws. It gets every placed stroke (`strokes`, in the order the canvas paints them, each with its `start` and `duration` in seconds, and its `path` and `place`) and `duration`, how long the timeline runs. It returns one `{ start, duration }` per stroke, in the same order. It runs once per layout, after `geometry`, so where a stroke is can decide when it draws: a sweep across the text, or a pen that takes longer to travel to a stroke that's further away.
+
+```ts
+// Every stroke at the same pace, 4 ems of line a second, one after another.
+const steady: TegakiPlugin = {
+  name: 'steady',
+  timing({ strokes, fontSize }) {
+    let clock = 0;
+    return {
+      strokes: strokes.map((s) => {
+        const time = { start: clock, duration: s.path.length / fontSize / 4 };
+        clock += time.duration + 0.05;
+        return time;
+      }),
+    };
+  },
+};
+```
+
+- Everything plays the new timeline: `engine.duration`, `currentTime` as a share of it (`'50%'`, CSS time), the pen head and `frame.active`, `onComplete`, `onChangeTimeline`, and the SVG from `toSVG`.
+- The timeline runs on past the last stroke as long as it did before. Return `duration` too to change that: to hold at the end, or to leave time for an effect of yours to finish (an eraser rubbing the text out). It never ends before the last stroke does.
+- A glyph's easing (`timing.glyphEasing`) runs over the time its strokes now span. Characters drawn from the fallback font keep their distance from the glyph before them.
+- Plugins run in order, each on the times the one before returned. The `timing` option schedules the text in the first place, and plugins retime what it scheduled.
+- A stroke with a `duration` of `0` is drawn all at once.
+
 ### Painting strokes
 
 `paint` gets each stroke (`stroke.stroke`, a stroke of [the frame](#engineframeattime) with its `state`, `path` and `progress`) and `next`, which paints it the way the rest of the chain would: the plugins after yours, then the default painter. Change what you pass to `next` (`style`, the stroke's `path`), call it more than once, draw around it, or skip it. `style` is a CSS color, a canvas gradient or pattern, or a function giving the color at each draw progress. `textBox` is the box the text's lines fill. Each stroke's `place.scale` is px per font unit. `frame` is the whole frame: its `time` in seconds, and every stroke in it (the rest of the glyph, or when the last stroke ends). With the stroke's `start` and `duration`, `frame.time - (start + duration * t)` is about how long ago the pen passed the point at progress `t`, for ink that dries or fades.
 
-`paint` is called for every stroke on every frame, including the ones the pen hasn't reached (their `stroke.state` is `'pending'`), so a plugin can decide for itself what shows when: stamp a whole glyph the moment its first stroke starts, the way a typewriter does, or start from the text written out and rub it away. The default painter paints only what's drawn, so a pending stroke passed on unchanged shows nothing; to show it, pass it on with `state: 'done'` and the `progress` you want. Anything you draw directly, rather than through `next`, should check `stroke.state` first.
+`paint` is called for every stroke on every frame, including the ones the pen hasn't reached (their `stroke.state` is `'pending'`), so a plugin can decide for itself what shows when: stamp a whole glyph the moment its first stroke starts, or show the text written out from the start and rub it away. The default painter paints only what's drawn, so a pending stroke passed on unchanged shows nothing; to show it, pass it on with `state: 'done'` and the `progress` you want. Anything you draw directly, rather than through `next`, should check `stroke.state` first.
 
 With clip-to-text on, everything painted on `ctx` is cut to the letters' shapes once the strokes are drawn. To paint past their edges (a wide brush, a pass around the ink, flecks off the line), paint on `unclipped` instead: pass the stroke on as `next({ ...stroke, ctx: stroke.unclipped })`, or draw on it directly. It's a layer of its own, laid under the clipped ink before the `ink` hooks run, so a glow or a shadow still sees it as ink, and strokes painted on it keep the pen's own width (clip-to-text's widening is only for ink it cuts). With clip-to-text off it's `ctx` itself.
 

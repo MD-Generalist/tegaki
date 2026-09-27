@@ -32,7 +32,23 @@ export function punch(age: number, strike: number): number {
   return strike * Math.exp(-age / 0.035) * Math.cos(age * 90);
 }
 
-/** The glyphs typed by `time`, each once: when it's struck (its slot's start) and where its advance ends. */
+/**
+ * When each character's key is struck, by grapheme index: one key after
+ * another, `rate` a second, each gap stretched or cut by up to half its
+ * length at `rhythm` 1 — a typist's uneven hand, drawn from `random`.
+ * Spaces and line breaks are keys too.
+ */
+export function keyTimes(count: number, rate: number, rhythm: number, random: () => number): number[] {
+  const out: number[] = [];
+  let at = 0;
+  for (let i = 0; i < count; i++) {
+    out.push(at);
+    at += (1 + rhythm * (random() - 0.5)) / rate;
+  }
+  return out;
+}
+
+/** The glyphs typed by `time`, each once: when it's struck and where its advance ends. */
 export function typedGlyphs(strokes: readonly StrokeFrame[]): { entryIndex: number; at: number; end: { x: number; y: number } }[] {
   const out = new Map<number, { entryIndex: number; at: number; end: { x: number; y: number } }>();
   for (const s of strokes) {
@@ -40,7 +56,7 @@ export function typedGlyphs(strokes: readonly StrokeFrame[]): { entryIndex: numb
     const { place } = s;
     out.set(s.entryIndex, {
       entryIndex: s.entryIndex,
-      at: s.entry.offset,
+      at: s.start,
       end: { x: place.x + s.glyph.w * place.scale, y: place.y + place.ascender * place.scale },
     });
   }
@@ -50,20 +66,31 @@ export function typedGlyphs(strokes: readonly StrokeFrame[]): { entryIndex: numb
 const WHITE: Rgba = [255, 255, 255, 1];
 
 /**
- * A typewriter: each glyph struck whole the moment its turn comes, rather
- * than written — snapped in by the typebar and settling, a little off true
- * and lighter or darker as the ribbon's ink allows, the same every time for
- * the same letter in the same place. A caret waits after the last glyph,
- * blinking once the typing stops, and each strike can clack (and the bell
- * ring at the end). `paint`, which sees every stroke, drawn or not, stamps a
- * glyph's strokes before the pen would reach them; the caret is an `overlay` blinking on
- * `steps`; the sound is `onFrame`. Speed up Motion for brisker typing.
+ * A typewriter: each glyph struck whole, key after key at a typist's
+ * pace, rather than written — snapped in by the typebar and settling, a
+ * little off true and lighter or darker as the ribbon's ink allows, the same
+ * every time for the same letter in the same place. A caret waits after the
+ * last glyph, blinking once the typing stops, and each strike can clack (and
+ * the bell ring at the end). `timing` sets when each key is struck (every
+ * stroke of its glyph at once), `paint` stamps the glyph set off true, the
+ * caret is an `overlay` blinking on `steps`, and the sound is `onFrame`.
  */
 export const typewriterPlugin = createPlugin({
   name: 'typewriter',
   label: 'Typewriter',
-  description: 'Each glyph struck whole in its turn, a little off true, with a blinking caret and a clack. paint + overlay + onFrame.',
+  description:
+    'Each glyph struck whole at a typist’s pace, a little off true, with a blinking caret and a clack. timing + paint + overlay + onFrame.',
   params: {
+    rate: { type: 'number', label: 'Rate', description: 'Keys struck a second.', default: 10, min: 2, max: 40, step: 1 },
+    rhythm: {
+      type: 'number',
+      label: 'Rhythm',
+      description: 'How unevenly the keys come.',
+      default: 0.5,
+      min: 0,
+      max: 1,
+      step: 0.05,
+    },
     misalign: {
       type: 'number',
       label: 'Misalign',
@@ -107,10 +134,10 @@ export const typewriterPlugin = createPlugin({
   },
   presets: {
     Worn: { misalign: 1, uneven: 0.85 },
-    Terminal: { misalign: 0, uneven: 0, strike: 0, caret: 'block' },
+    Terminal: { misalign: 0, uneven: 0, strike: 0, caret: 'block', rate: 30, rhythm: 0 },
     Clacky: { sound: true, strike: 0.8 },
   },
-  setup: ({ misalign, uneven, strike, caret, sound, volume }) => {
+  setup: ({ rate, rhythm, misalign, uneven, strike, caret, sound, volume }) => {
     const moved = new WeakMap<StrokePath, StrokePath>();
     const strikes = new Map<number, Strike>();
     const strikeFor = (seed: number) => {
@@ -141,11 +168,16 @@ export const typewriterPlugin = createPlugin({
       // Room for the caret past the last glyph, and a glyph struck off true.
       bounds: ({ strokes, fontSize }) => expandBox(unionBoxes(strokes.map((st) => st.path.bounds())), fontSize * 0.55),
       steps: caret === 'none' ? undefined : { count: 2, fps: 1.6, idle: true },
+      timing({ strokes, random }) {
+        const count = strokes.reduce((n, s) => Math.max(n, s.entry.graphemeIndex + 1), 0);
+        const keys = keyTimes(count, rate, rhythm, random('keys'));
+        return { strokes: strokes.map((s) => ({ start: keys[s.entry.graphemeIndex]!, duration: 0 })) };
+      },
       paint(s, next) {
         const { stroke, fontSize } = s;
-        const age = s.frame.time - stroke.entry.offset;
         // Not struck yet: nothing on the paper.
-        if (age < 0) return;
+        if (stroke.state === 'pending') return;
+        const age = s.frame.time - stroke.start;
         const st = strikeFor(stroke.seed);
         const push = punch(age, strike) * 0.05 * fontSize;
         let path = moved.get(stroke.path);

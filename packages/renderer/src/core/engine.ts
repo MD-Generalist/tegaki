@@ -23,6 +23,7 @@ import { type Box, expandBox, type StrokePath, unionBoxes } from '../lib/strokeP
 import {
   type PlacedStroke,
   placeStrokes,
+  retimeTimeline,
   type StrokeInstance,
   sampleFrame,
   strokeInkBounds,
@@ -54,6 +55,7 @@ import {
   reshapeWith,
   shapeSteps,
   steppedPlugins,
+  timingWith,
 } from './plugins.ts';
 import { buildChildren, buildRootProps, canvasBoxStyle, domCreateElement } from './render-elements.ts';
 import { getShaperForBundle, registerShaper, settledShaperForBundle } from './shaper-registry.ts';
@@ -289,7 +291,12 @@ export class TegakiEngine {
   private _seed = 0;
   /** The `seed` option as given — `'random'` keeps the number it picked until the option changes. */
   private _seedOption: number | 'random' = 0;
-  private _timeline: Timeline = { entries: [] as TimelineEntry[], totalDuration: 0 };
+  /** The timeline as scheduled from the text and `timing` options, before the plugins' `timing` hooks retime it (see `_timeline`). */
+  private _scheduled: Timeline = { entries: [] as TimelineEntry[], totalDuration: 0 };
+  /** `_timeline` as the plugins' `timing` hooks made it, memoized for what it's made from. */
+  private _timedCache: { deps: unknown[]; timeline: Timeline } | null = null;
+  /** The timeline `onChangeTimeline` last reported. */
+  private _notifiedTimeline: Timeline | null = null;
   private _layout: TextLayout | null = null;
   /** Where the layout last wrapped `text` inside a word — the timeline shapes each side on its own. */
   private _softBreaks: { text: string; offsets: number[] } | null = null;
@@ -307,10 +314,12 @@ export class TegakiEngine {
   // WeakMap are orphaned and GC'd along with the map.
   private _strokeCache: WeakMap<TegakiGlyphData['s'][number], SubdividedStroke> = new WeakMap();
   private _strokeCacheKey = '';
-  /** `strokes`, memoized for the timeline and font it was computed from. */
-  private _strokes: { timeline: Timeline; font: TegakiBundle; list: StrokeInstance[] } | null = null;
-  /** `_placedStrokes()`, memoized for what places them (see there) — one list per combination of the plugins' drawings. */
+  /** Each timeline's strokes (`strokes`), memoized for the font they were computed from. */
+  private _strokes = new WeakMap<Timeline, { font: TegakiBundle; list: StrokeInstance[] }>();
+  /** `_shapedStrokes()`, memoized for what places them (see `_placedStrokes`) — one list per combination of the plugins' drawings. */
   private _placed: { deps: unknown[]; byStep: Map<string, PlacedStroke[]> } | null = null;
+  /** Each list of shaped strokes at the times the plugins' `timing` gives them (see `_placedStrokes`). */
+  private _timedPlaced = new WeakMap<PlacedStroke[], { timeline: Timeline; list: PlacedStroke[] }>();
   /** The drawing each plugin with `steps` shows now — chosen at the start of every render. */
   private _steps: { steps: PluginSteps; key: string } = { steps: new Map(), key: '' };
   /** Where the clock for plugin steps starts, outside controlled time (`performance.now()` ms). */
@@ -507,13 +516,7 @@ export class TegakiEngine {
    * with the timeline (see `onChangeTimeline`). Treat as read-only.
    */
   get strokes(): readonly StrokeInstance[] {
-    const font = this._font;
-    if (!font?.glyphData) return [];
-    const cached = this._strokes;
-    if (cached?.timeline === this._timeline && cached.font === font) return cached.list;
-    const list = strokeInstances(this._timeline, font);
-    this._strokes = { timeline: this._timeline, font, list };
-    return list;
+    return this._strokesOf(this._timeline);
   }
 
   /**
@@ -634,6 +637,7 @@ export class TegakiEngine {
           offset: entry.offset,
           duration: entry.duration,
           strokeDelays: entry.strokeDelays,
+          strokeDurations: entry.strokeDurations,
           strokeTimeScale: entry.strokeTimeScale,
           seed: this._seed + charIdx,
         });
@@ -966,6 +970,7 @@ export class TegakiEngine {
     this._underlayCanvas = null;
     this._unclippedCanvas = null;
     this._placed = null;
+    this._timedCache = null;
     this._allPluginsCache = null;
     this._pluginBoundsCache = null;
     this._textBoxCache = null;
@@ -1358,16 +1363,59 @@ export class TegakiEngine {
   private _recomputeTimeline(): void {
     if (this._font && this._text) {
       const wraps = this._softBreaks?.text === this._text ? this._softBreaks.offsets : undefined;
-      this._timeline = computeTimeline(this._text, this._font, this._timing, this._shaper, this._shapeOptions(), wraps);
+      this._scheduled = computeTimeline(this._text, this._font, this._timing, this._shaper, this._shapeOptions(), wraps);
     } else {
-      this._timeline = { entries: [] as TimelineEntry[], totalDuration: 0 };
+      this._scheduled = { entries: [] as TimelineEntry[], totalDuration: 0 };
     }
+    // A `timing` hook retimes the strokes as the layout places them, and the
+    // layout may be out of date until the next render — which reports it.
+    if (!this._allPlugins().some((p) => p.timing)) this._timelineChanged();
+    this._loadFullFontIfNeeded();
+  }
+
+  /** Report the timeline if it changed since last reported (`onChangeTimeline`). */
+  private _timelineChanged(): void {
+    const timeline = this._timeline;
+    if (timeline === this._notifiedTimeline) return;
+    this._notifiedTimeline = timeline;
     // Under reduced motion, finished text stays finished as its timeline changes (new text, a rewrap).
     if (this._prevCompleted && this._timeControl.mode === 'uncontrolled' && this._motionReduced) {
-      this._internalTime = this._timeline.totalDuration;
+      this._internalTime = timeline.totalDuration;
     }
-    this._onChangeTimeline?.(this._timeline);
-    this._loadFullFontIfNeeded();
+    this._updateCssProperties();
+    this._onChangeTimeline?.(timeline);
+  }
+
+  /**
+   * The timeline everything plays: the scheduled one, retimed by the plugins'
+   * `timing` hooks — once the layout has placed the strokes they retime.
+   */
+  private get _timeline(): Timeline {
+    const scheduled = this._scheduled;
+    const plugins = this._allPlugins();
+    if (!plugins.some((p) => p.timing)) return scheduled;
+    const placed = this._shapedStrokes(allPluginSteps(plugins, 1)[0]!);
+    if (placed.length === 0) return scheduled;
+    const deps: unknown[] = [scheduled, placed, plugins];
+    const cached = this._timedCache;
+    if (cached?.deps.every((d, i) => d === deps[i])) return cached.timeline;
+    const random = (key: string | number) => seededRandom(this._seed, key);
+    const retime = timingWith(plugins, { fontSize: this._fontSize, random }, this._reportPluginError)!;
+    const timed = retime(placed, scheduled.totalDuration);
+    const timeline = retimeTimeline(scheduled, placed, timed.strokes, timed.duration);
+    this._timedCache = { deps, timeline };
+    return timeline;
+  }
+
+  /** A timeline's strokes (see `strokes`). */
+  private _strokesOf(timeline: Timeline): StrokeInstance[] {
+    const font = this._font;
+    if (!font?.glyphData) return [];
+    const cached = this._strokes.get(timeline);
+    if (cached?.font === font) return cached.list;
+    const list = strokeInstances(timeline, font);
+    this._strokes.set(timeline, { font, list });
+    return list;
   }
 
   /**
@@ -1434,7 +1482,7 @@ export class TegakiEngine {
           this._fontSize,
           this._font,
           this._shaper,
-          this._timeline,
+          this._scheduled,
           letterSpacingEm,
         );
       }
@@ -1781,11 +1829,30 @@ export class TegakiEngine {
    * clip-to-text width) and the seed.
    */
   private _placedStrokes(steps: PluginSteps = this._steps.steps): PlacedStroke[] {
+    const shaped = this._shapedStrokes(steps);
+    const timeline = this._timeline;
+    if (timeline === this._scheduled) return shaped;
+    let timed = this._timedPlaced.get(shaped);
+    if (timed?.timeline !== timeline) {
+      const byId = new Map(this._strokesOf(timeline).map((s) => [s.id, s]));
+      const list = shaped.map((s) => {
+        const t = byId.get(s.id);
+        return t && (t.start !== s.start || t.duration !== s.duration || t.entry !== s.entry)
+          ? { ...s, start: t.start, duration: t.duration, entry: t.entry }
+          : s;
+      });
+      this._timedPlaced.set(shaped, (timed = { timeline, list }));
+    }
+    return timed.list;
+  }
+
+  /** The strokes placed and shaped (see `_placedStrokes`), at the times they're scheduled for. */
+  private _shapedStrokes(steps: PluginSteps): PlacedStroke[] {
     const font = this._font;
     const layout = this._layout;
     const fontSize = this._fontSize;
     if (!font?.glyphData || !layout || !fontSize) return [];
-    const strokes = this.strokes;
+    const strokes = this._strokesOf(this._scheduled);
     const lineHeight = this._lineHeight;
     const plugins = this._allPlugins();
     const deps: unknown[] = [strokes, layout, fontSize, lineHeight, plugins, this._quality, this._seed];
@@ -1803,7 +1870,7 @@ export class TegakiEngine {
     layout.lines.forEach((line, li) => {
       for (const charIdx of line) graphemeToLine.set(charIdx, li);
     });
-    const entries = this._timeline.entries;
+    const entries = this._scheduled.entries;
     const random = (key: string | number) => seededRandom(this._seed, key);
     // At the pen's own width: clip-to-text's widening is the painter's business (see `_render`).
     const list = placeStrokes(strokes, {
@@ -2036,6 +2103,7 @@ export class TegakiEngine {
   }
 
   private _render(): void {
+    this._timelineChanged();
     const canvas = this._canvasEl;
     const font = this._font;
     const layout = this._layout;

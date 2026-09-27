@@ -1,9 +1,16 @@
 import { paintStroke } from '../lib/paintStroke.ts';
 import type { StrokePath } from '../lib/strokePath.ts';
-import type { StrokeGeometryContext } from '../lib/strokeTimeline.ts';
-import type { TegakiGeometryContext, TegakiOutlineContext, TegakiPlugin, TegakiPluginSteps, TegakiStrokePaintContext } from './types.ts';
+import type { PlacedStroke, StrokeGeometryContext } from '../lib/strokeTimeline.ts';
+import type {
+  TegakiGeometryContext,
+  TegakiOutlineContext,
+  TegakiPlugin,
+  TegakiPluginSteps,
+  TegakiStrokePaintContext,
+  TegakiTimingContext,
+} from './types.ts';
 
-// Running a list of plugins' hooks as one: `geometry` in sequence, `paint` as
+// Running a list of plugins' hooks as one: `geometry` and `timing` in sequence, `paint` as
 // a chain of `next` calls ending in the default painter. A hook that throws
 // is reported and skipped, so one broken plugin can't stop the render.
 
@@ -101,6 +108,55 @@ export function reshapeWith(
     }
     return out;
   };
+}
+
+/**
+ * Every `timing` hook in order, as one: the strokes at the times the last
+ * hook gave them, and the timeline's length; `undefined` when no plugin has
+ * one. A hook that throws, or doesn't return a time for every stroke, is
+ * reported and skipped. Times are kept to zero or later.
+ */
+export function timingWith(
+  plugins: readonly TegakiPlugin[],
+  extra: Pick<TegakiTimingContext, 'fontSize' | 'random'>,
+  onError: PluginErrorHandler,
+): ((strokes: readonly PlacedStroke[], duration: number) => { strokes: readonly PlacedStroke[]; duration: number }) | undefined {
+  const hooks = plugins.filter((p) => p.timing);
+  if (hooks.length === 0) return undefined;
+  return (strokes, duration) => {
+    let last = lastEnd(strokes);
+    for (const plugin of hooks) {
+      try {
+        const out = plugin.timing!({ ...extra, strokes, duration });
+        if (!out) continue;
+        const times = out.strokes;
+        if (!Array.isArray(times) || times.length !== strokes.length) {
+          throw new Error(`timing returned ${Array.isArray(times) ? times.length : 'no'} stroke times for ${strokes.length} strokes`);
+        }
+        const next = strokes.map((s, i) => {
+          const t = times[i];
+          if (!t || !Number.isFinite(t.start) || !Number.isFinite(t.duration))
+            throw new Error(`timing gave stroke ${i} no finite start and duration`);
+          const start = Math.max(0, t.start);
+          const length = Math.max(0, t.duration);
+          return start === s.start && length === s.duration ? s : { ...s, start, duration: length };
+        });
+        const end = lastEnd(next);
+        duration = Math.max(end, out.duration !== undefined && Number.isFinite(out.duration) ? out.duration : duration + end - last);
+        strokes = next;
+        last = end;
+      } catch (error) {
+        onError(plugin, 'timing', error);
+      }
+    }
+    return { strokes, duration };
+  };
+}
+
+function lastEnd(strokes: readonly { start: number; duration: number }[]): number {
+  let end = 0;
+  for (const s of strokes) end = Math.max(end, s.start + s.duration);
+  return end;
 }
 
 /** Every `outline` hook in order, as one; `undefined` when no plugin has one. Each hook is told its plugin's drawing in `ctx.step`. */

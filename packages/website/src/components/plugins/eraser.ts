@@ -1,4 +1,4 @@
-import { createPlugin, expandBox, type StrokeFrame, type StrokePath, seededRandom, type TegakiFrame, unionBoxes } from 'tegaki/core';
+import { createPlugin, expandBox, type StrokeFrame, type StrokePath, type StrokeTime, seededRandom, unionBoxes } from 'tegaki/core';
 import { canvasColor, mix, type Rgba, rgba } from './color.ts';
 
 export type EraseMode = 'erase' | 'write-erase';
@@ -8,7 +8,7 @@ const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 
 /** A stroke at one moment of the erasing: how much of it is written and erased (0–1 each), and what's left. */
 export interface Erasing {
-  /** Share of the stroke written so far (always 1 in `'erase'`, where the text starts written). */
+  /** Share of the stroke written so far. */
   written: number;
   /** Share of the stroke the eraser has been over. */
   erased: number;
@@ -20,25 +20,37 @@ export interface Erasing {
 }
 
 /**
- * A stroke at `time`. `total` is when the timeline ends. In `'erase'` the
- * text starts written and is erased over the timeline; in `'write-erase'`
- * it's written in the first half and erased in the second. `'reverse'`
- * erases the last stroke first, running back along it (its erased part is
- * `[1 - erased, 1]`); `'same'` erases in writing order, along each stroke
- * (`[0, erased]`).
+ * The timeline an eraser plays, from the strokes' times and the timeline's
+ * length (`total`): when each stroke is written and when it's erased, each as
+ * long as it took to write, and how long it all runs. In `'write-erase'` the
+ * text is written as it would be, then erased over as long again; in
+ * `'erase'` it's all there from the start and erased over the timeline.
+ * `'reverse'` erases the last stroke first, `'same'` in writing order.
  */
-export function erasingAt(
-  stroke: Pick<StrokeFrame, 'start' | 'duration'>,
-  time: number,
+export function eraseTimeline(
+  strokes: readonly StrokeTime[],
   total: number,
   mode: EraseMode,
   order: EraseOrder,
-): Erasing {
-  const half = mode === 'write-erase';
-  const { start, duration } = stroke;
-  const written = half ? clamp01((time - start / 2) / (duration / 2)) : 1;
-  const eraseStart = order === 'reverse' ? total - (start + duration) : start;
-  const erased = half ? clamp01((time - total / 2 - eraseStart / 2) / (duration / 2)) : clamp01((time - eraseStart) / duration);
+): { write: StrokeTime[]; erase: StrokeTime[]; duration: number } {
+  const from = mode === 'write-erase' ? total : 0;
+  return {
+    write:
+      mode === 'write-erase'
+        ? strokes.map((s) => ({ start: s.start, duration: s.duration }))
+        : strokes.map(() => ({ start: 0, duration: 0 })),
+    erase: strokes.map((s) => ({ start: from + (order === 'reverse' ? total - (s.start + s.duration) : s.start), duration: s.duration })),
+    duration: from + total,
+  };
+}
+
+/**
+ * A stroke at `time`, `written` of it drawn (its draw progress), erased over
+ * its `erase` window — `'reverse'` running back along it (its erased part is
+ * `[1 - erased, 1]`), `'same'` along it (`[0, erased]`).
+ */
+export function erasingAt(written: number, erase: StrokeTime, time: number, order: EraseOrder): Erasing {
+  const erased = erase.duration > 0 ? clamp01((time - erase.start) / erase.duration) : time >= erase.start ? 1 : 0;
   const erasing = erased > 0 && erased < 1;
   if (order === 'reverse') return { written, erased, from: 0, to: Math.min(written, 1 - erased), eraser: erasing ? 1 - erased : null };
   return { written, erased, from: erased, to: written, eraser: erasing ? erased : null };
@@ -75,16 +87,17 @@ const WHITE: Rgba = [255, 255, 255, 1];
 /**
  * An eraser rubbing the text out: stroke by stroke, a rubber block scrubs
  * along the ink, leaving a faint ghost of it and crumbs of rubber. It can
- * erase the text from written, or write it and then erase it in one
- * timeline — the last stroke first (an undo), or in writing order. `paint`,
- * which sees every stroke whether or not the pen has reached it, paints
- * each one's stretch still on the paper, from the frame's time and the
- * whole timeline's length; the eraser and crumbs are an `overlay`.
+ * erase the text from written, or write it and then erase it — the last
+ * stroke first (an undo), or in writing order. `timing` makes the time for
+ * the erasing (the timeline runs on past the writing, or starts with it all
+ * written), `paint` paints each stroke's stretch still on the paper, and the
+ * eraser and crumbs are an `overlay`.
  */
 export const eraserPlugin = createPlugin({
   name: 'eraser',
   label: 'Eraser',
-  description: 'An eraser rubs the text out stroke by stroke, leaving a ghost and crumbs — or writes it, then erases it. paint + overlay.',
+  description:
+    'An eraser rubs the text out stroke by stroke, leaving a ghost and crumbs — or writes it, then erases it. timing + paint + overlay.',
   params: {
     mode: {
       type: 'select',
@@ -121,24 +134,25 @@ export const eraserPlugin = createPlugin({
     Chalkboard: { mode: 'erase', order: 'same', ghost: 0.3, crumbs: 0 },
   },
   setup: ({ mode, order, ghost, crumbs: crumbAmount, tool }) => {
-    const totals = new WeakMap<TegakiFrame, number>();
-    const totalOf = (frame: TegakiFrame) => {
-      let total = totals.get(frame);
-      if (total === undefined) {
-        total = 0;
-        for (const s of frame.strokes) total = Math.max(total, s.start + s.duration);
-        totals.set(frame, total);
-      }
-      return total;
+    // When the eraser goes over each stroke, by id — set once per layout by `timing`.
+    let erases = new Map<string, StrokeTime>();
+    const erasing = (s: StrokeFrame, time: number) => {
+      const erase = erases.get(s.id);
+      return erase ? erasingAt(s.state === 'pending' ? 0 : s.progress, erase, time, order) : null;
     };
     const crumbsOf = new WeakMap<StrokePath, Crumb[]>();
     let ink: { style: string; ghost: string | null } | null = null;
     return {
       bounds: ({ strokes, fontSize }) => expandBox(unionBoxes(strokes.map((s) => s.path.bounds())), fontSize * (tool ? 0.7 : 0.15)),
+      timing({ strokes, duration }) {
+        const t = eraseTimeline(strokes, duration, mode, order);
+        erases = new Map(strokes.map((s, i) => [s.id, t.erase[i]!]));
+        return { strokes: t.write, duration: t.duration };
+      },
       paint(s, next) {
         const { stroke, frame } = s;
-        const { time } = frame;
-        const e = erasingAt(stroke, time, totalOf(frame), mode, order);
+        const e = erasing(stroke, frame.time);
+        if (!e) return next(s);
         const whole = e.from <= 0 && e.to >= 1;
         if (ghost > 0 && e.erased > 0 && typeof s.style === 'string' && stroke.path.points.length > 1) {
           // The ghost of what's been written: the ink, nearly all rubbed away, under what's left.
@@ -159,13 +173,12 @@ export const eraserPlugin = createPlugin({
         next({ ...s, stroke: { ...stroke, state: 'done', progress: 1, path, nibs: whole ? stroke.nibs : [] } });
       },
       overlay({ ctx, frame, fontSize, random }) {
-        const total = totalOf(frame);
         if (crumbAmount > 0) {
           ctx.fillStyle = '#d98f9b';
           ctx.globalAlpha = 0.75;
           for (const s of frame.strokes) {
-            const e = erasingAt(s, frame.time, total, mode, order);
-            if (e.erased <= 0) continue;
+            const e = erasing(s, frame.time);
+            if (!e || e.erased <= 0) continue;
             let list = crumbsOf.get(s.path);
             if (!list) crumbsOf.set(s.path, (list = crumbs(s.path, fontSize, crumbAmount, random(`crumbs:${s.id}`))));
             for (const c of list) {
@@ -178,7 +191,7 @@ export const eraserPlugin = createPlugin({
         }
         if (!tool) return;
         for (const s of frame.strokes) {
-          const { eraser } = erasingAt(s, frame.time, total, mode, order);
+          const eraser = erasing(s, frame.time)?.eraser ?? null;
           if (eraser === null) continue;
           const at = s.path.pointAt(eraser);
           // Scrubbing: back and forth along the stroke as it goes.

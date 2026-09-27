@@ -1,7 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import type { TegakiBundle, TegakiGlyphData } from '../types.ts';
 import { subdivideStroke } from './strokeCache.ts';
-import { type PlacedStroke, placeStrokes, rawStrokePath, sampleFrame, sampleStroke, strokeInstances } from './strokeTimeline.ts';
+import {
+  type PlacedStroke,
+  placeStrokes,
+  rawStrokePath,
+  retimeTimeline,
+  sampleFrame,
+  sampleStroke,
+  strokeInstances,
+} from './strokeTimeline.ts';
 import { computeTimeline } from './timeline.ts';
 
 type Pt = [number, number, number];
@@ -215,5 +223,68 @@ describe('placeStrokes / sampleFrame', () => {
   test('strokes of glyphs the layout does not place are left out', () => {
     const some: PlacedStroke[] = placeStrokes(strokes, { placeEntry: (ei: number) => (ei === 0 ? place : null) });
     expect(some.map((s) => s.entry.char)).toEqual(['a', 'a']);
+  });
+});
+
+describe('retimeTimeline', () => {
+  // 'a a': glyph, space, glyph — two strokes each.
+  const timeline = computeTimeline('a a', bundle, { glyphGap: 0.1, wordGap: 0.2 });
+  const strokes = strokeInstances(timeline, bundle);
+  const same = strokes.map((s) => ({ start: s.start, duration: s.duration }));
+
+  test('nothing moved is the same timeline', () => {
+    expect(retimeTimeline(timeline, strokes, same)).toBe(timeline);
+  });
+
+  test('a glyph with a stroke moved spans its strokes, each drawing when and as long as it was given', () => {
+    const times = same.map((t, i) => (i === 1 ? { start: 5, duration: 2 } : t));
+    const retimed = retimeTimeline(timeline, strokes, times);
+    const entry = retimed.entries[0]!;
+    expect([entry.offset, entry.duration]).toEqual([0, 7]);
+    const [first, second] = strokeInstances(retimed, bundle);
+    expect([first!.start, first!.duration]).toEqual([0, 1]);
+    expect([second!.start, second!.duration]).toEqual([5, 2]);
+  });
+
+  test('a stroke samples at its new time', () => {
+    const times = same.map((t, i) => (i === 0 ? { start: 2, duration: 1 } : t));
+    const retimed = retimeTimeline(timeline, strokes, times);
+    const first = strokeInstances(retimed, bundle)[0]!;
+    expect(sampleStroke(first, 1.9).state).toBe('pending');
+    expect(sampleStroke(first, 2.5, { strokeEasing: linear }).progress).toBeCloseTo(0.5, 6);
+  });
+
+  test('a glyph with no stroke moved keeps its slot', () => {
+    const times = same.map((t, i) => (i >= 2 ? { start: t.start + 1, duration: t.duration } : t));
+    const retimed = retimeTimeline(timeline, strokes, times);
+    expect(retimed.entries[0]).toBe(timeline.entries[0]!);
+  });
+
+  test('an entry with no strokes keeps its distance from the end of the one before', () => {
+    // Every stroke instant, from 0: the first glyph ends at once, and the space follows it by the same gap.
+    const times = same.map((_, i) => ({ start: i < 2 ? 0 : 1, duration: 0 }));
+    const retimed = retimeTimeline(timeline, strokes, times);
+    const [a, space] = timeline.entries;
+    expect(retimed.entries[1]!.offset).toBeCloseTo(space!.offset - (a!.offset + a!.duration), 6);
+  });
+
+  test('the timeline runs as long past its last end as it did, or as long as asked, never short of its last end', () => {
+    const shifted = same.map((t) => ({ start: t.start + 1, duration: t.duration }));
+    expect(retimeTimeline(timeline, strokes, shifted).totalDuration).toBeCloseTo(timeline.totalDuration + 1, 6);
+    expect(retimeTimeline(timeline, strokes, same, 99).totalDuration).toBe(99);
+    expect(retimeTimeline(timeline, strokes, shifted, 0.5).totalDuration).toBeCloseTo(timeline.totalDuration + 1, 6);
+  });
+
+  test('a retimed glyph drops its stagger scale: its durations are in seconds', () => {
+    const tl = computeTimeline('a', bundle, { stagger: { advance: 0, duration: 3 } });
+    const list = strokeInstances(tl, bundle);
+    const retimed = retimeTimeline(tl, list, [
+      { start: 0, duration: 0.5 },
+      { start: 0.5, duration: 0.5 },
+    ]);
+    expect(strokeInstances(retimed, bundle).map((s) => [s.start, s.duration])).toEqual([
+      [0, 0.5],
+      [0.5, 0.5],
+    ]);
   });
 });

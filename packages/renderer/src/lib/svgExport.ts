@@ -26,6 +26,8 @@ export interface SvgGlyphPlacement {
   duration?: number;
   /** Per-stroke delay overrides from the scheduler (deferred dots), in slot-relative seconds. See `TimelineEntry`. */
   strokeDelays?: (number | undefined)[];
+  /** Per-stroke duration overrides (a plugin's `timing`), in seconds. See `TimelineEntry`. */
+  strokeDurations?: (number | undefined)[];
   /** Multiplier on every bundled stroke delay and duration (stagger with a fixed duration). Default `1`. */
   strokeTimeScale?: number;
   /** Effect seed — wobble phase, gradient hue. The engine's is its seed + the grapheme index. Default `0`. */

@@ -101,6 +101,12 @@ export interface TimelineEntry {
    */
   strokeDelays?: (number | undefined)[];
   /**
+   * Sparse per-stroke override of the bundled stroke's `a` (duration) field,
+   * as `strokeDelays` is of `d`, in seconds (not scaled by `strokeTimeScale`).
+   * Populated when a plugin's `timing` retimes the glyph's strokes.
+   */
+  strokeDurations?: (number | undefined)[];
+  /**
    * X offset of this glyph relative to its visual line's left edge, in em.
    * Populated by `applyShaperPositions` from the shaper's pen-walk: this is
    * `pen.x + dx` where `dx` is the GPOS x-offset for the glyph. The engine

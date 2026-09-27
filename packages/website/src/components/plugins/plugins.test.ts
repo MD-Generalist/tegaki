@@ -7,7 +7,7 @@ import { mix, parseCanvasColor } from './color.ts';
 import { colorIndex, PALETTES, pickColor } from './colors.ts';
 import { dimAt, tearsAt } from './crt.ts';
 import { echoPasses, echoPlugin, lagged } from './echo.ts';
-import { crumbs, erasingAt, isErased } from './eraser.ts';
+import { crumbs, eraseTimeline, erasingAt, isErased } from './eraser.ts';
 import { graphiteGray, smudges, splinters } from './graphite.ts';
 import { hapticFor } from './haptics.ts';
 import { createShowcasePlugins, normalizePluginOptions, SHOWCASE_PLUGINS } from './index.ts';
@@ -18,13 +18,15 @@ import { broadNib, nibFactor } from './nib.ts';
 import { grainTile } from './noise.ts';
 import { paperBounds, paperLayout } from './paper.ts';
 import { penPoses } from './pen.ts';
+import { handTimes } from './rhythm.ts';
 import { shakeAt, shakeStrength } from './shake.ts';
 import { tremorAt, tremorWaves } from './shaky.ts';
 import { leanAbout } from './slant.ts';
 import { penMotion } from './sound.ts';
 import { sparkleAt, strokeSparkles } from './sparkle.ts';
 import { layoutGuides } from './stroke-order.ts';
-import { punch, strikeOf, typedGlyphs } from './typewriter.ts';
+import { sweepOrder, sweepTimes } from './sweep.ts';
+import { keyTimes, punch, strikeOf, typedGlyphs } from './typewriter.ts';
 import { dryness, inkAge, poolFactors } from './wet.ts';
 
 /** A straight stroke from (x0, y) to (x1, y), `width` px wide. */
@@ -478,31 +480,49 @@ describe('haptics', () => {
 });
 
 describe('eraser', () => {
-  const stroke = { start: 1, duration: 1 };
+  // Two strokes, 0–1 and 1–2, in a timeline 2.5s long.
+  const strokes = [
+    { start: 0, duration: 1 },
+    { start: 1, duration: 1 },
+  ];
 
-  test('erasing from written, the last stroke first, runs back along the stroke', () => {
-    // total 4: this stroke ends at 2, so it's erased from 2 to 3.
-    expect(erasingAt(stroke, 1.5, 4, 'erase', 'reverse')).toMatchObject({ from: 0, to: 1, eraser: null });
-    const mid = erasingAt(stroke, 2.5, 4, 'erase', 'reverse');
+  test('write, then erase: written as it was, then erased over as long again, the last stroke first', () => {
+    const t = eraseTimeline(strokes, 2.5, 'write-erase', 'reverse');
+    expect(t.write).toEqual(strokes);
+    expect(t.erase).toEqual([
+      { start: 4, duration: 1 },
+      { start: 3, duration: 1 },
+    ]);
+    expect(t.duration).toBe(5);
+  });
+
+  test('erasing from written: all there at the start, erased over the timeline in writing order', () => {
+    const t = eraseTimeline(strokes, 2.5, 'erase', 'same');
+    expect(t.write).toEqual([
+      { start: 0, duration: 0 },
+      { start: 0, duration: 0 },
+    ]);
+    expect(t.erase).toEqual(strokes);
+    expect(t.duration).toBe(2.5);
+  });
+
+  test('erasing the last stroke first runs back along the stroke', () => {
+    const erase = { start: 2, duration: 1 };
+    expect(erasingAt(1, erase, 1.5, 'reverse')).toMatchObject({ from: 0, to: 1, eraser: null });
+    const mid = erasingAt(1, erase, 2.5, 'reverse');
     expect(mid.to).toBeCloseTo(0.5);
     expect(mid.eraser).toBeCloseTo(0.5);
-    expect(erasingAt(stroke, 3.5, 4, 'erase', 'reverse').to).toBe(0);
+    expect(erasingAt(1, erase, 3.5, 'reverse').to).toBe(0);
   });
 
-  test('erasing as written runs along each stroke from its start', () => {
-    const mid = erasingAt(stroke, 1.5, 4, 'erase', 'same');
+  test('erasing as written runs along each stroke from its start, up to what’s written', () => {
+    const mid = erasingAt(0.8, { start: 1, duration: 1 }, 1.5, 'same');
     expect(mid.from).toBeCloseTo(0.5);
-    expect(mid.to).toBe(1);
-  });
-
-  test('write, then erase: written in the first half, erased in the second', () => {
-    expect(erasingAt(stroke, 0.75, 4, 'write-erase', 'same')).toMatchObject({ written: 0.5, erased: 0 });
-    expect(erasingAt(stroke, 1.5, 4, 'write-erase', 'same')).toMatchObject({ written: 1, erased: 0 });
-    expect(erasingAt(stroke, 2.75, 4, 'write-erase', 'same')).toMatchObject({ written: 1, erased: 0.5 });
+    expect(mid.to).toBe(0.8);
   });
 
   test('crumbs show where the eraser has been', () => {
-    const e = erasingAt(stroke, 2.5, 4, 'erase', 'reverse');
+    const e = erasingAt(1, { start: 2, duration: 1 }, 2.5, 'reverse');
     expect(isErased(e, 0.8, 'reverse')).toBe(true);
     expect(isErased(e, 0.2, 'reverse')).toBe(false);
     expect(crumbs(line(0, 200, 0), 100, 1, lcg()).length).toBe(8);
@@ -524,9 +544,18 @@ describe('typewriter', () => {
     expect(Math.abs(punch(0.3, 1))).toBeLessThan(0.001);
   });
 
-  test('glyphs are typed in the order their slots come, once each, ending where their advance does', () => {
-    const at = (entryIndex: number, offset: number, x: number) =>
-      ({ entryIndex, entry: { offset }, place: { x, y: 0, scale: 0.1, ascender: 800 }, glyph: { w: 500 } }) as unknown as StrokeFrame;
+  test('keys come at the rate, evenly without rhythm, unevenly with it', () => {
+    expect(keyTimes(4, 10, 0, lcg())).toEqual([0, 0.1, 0.2, 0.30000000000000004]);
+    const uneven = keyTimes(20, 10, 1, lcg());
+    const gaps = uneven.slice(1).map((t, i) => t - uneven[i]!);
+    expect(Math.min(...gaps)).toBeGreaterThanOrEqual(0.05);
+    expect(Math.max(...gaps)).toBeLessThanOrEqual(0.15);
+    expect(new Set(gaps.map((g) => g.toFixed(4))).size).toBeGreaterThan(5);
+  });
+
+  test('glyphs are typed in the order they’re struck, once each, ending where their advance does', () => {
+    const at = (entryIndex: number, start: number, x: number) =>
+      ({ entryIndex, start, place: { x, y: 0, scale: 0.1, ascender: 800 }, glyph: { w: 500 } }) as unknown as StrokeFrame;
     const typed = typedGlyphs([at(1, 0.5, 50), at(0, 0, 0), at(1, 0.5, 50)]);
     expect(typed.map((g) => g.entryIndex)).toEqual([0, 1]);
     expect(typed[1]!.end).toEqual({ x: 100, y: 80 });
@@ -570,5 +599,67 @@ describe('screen shake', () => {
     const live = shaking(4, [stroke('0', line(0, 100, 0), 'drawing', 0.5, 1)]);
     expect(shakeStrength(live, { ...o, trigger: 'writing' })).toBeCloseTo(0.45);
     expect(shakeStrength(live, o)).toBe(0);
+  });
+});
+
+describe('hand rhythm', () => {
+  // Two strokes in a row, 100px to the em: a 1em stroke, then a 2em one starting 1em past where it ended.
+  const strokes = [
+    { start: 0, duration: 1, path: line(0, 100, 0) },
+    { start: 1, duration: 1, path: line(200, 400, 0) },
+  ];
+  const steady = { speed: 4, travel: 0.1, hesitate: 0 };
+
+  test('at a speed, a stroke takes as long as its length, after the pen travels to it', () => {
+    const [a, b] = handTimes(strokes, 100, steady, lcg());
+    expect(a).toEqual({ start: 0, duration: 0.25 });
+    expect(b!.start).toBeCloseTo(0.25 + 0.03 + 0.1, 6);
+    expect(b!.duration).toBeCloseTo(0.5, 6);
+  });
+
+  test('at speed 0 each stroke keeps its own duration', () => {
+    expect(handTimes(strokes, 100, { ...steady, speed: 0 }, lcg()).map((t) => t.duration)).toEqual([1, 1]);
+  });
+
+  test('strokes keep the order they came in, whatever order they’re listed', () => {
+    const [b, a] = handTimes([strokes[1]!, strokes[0]!], 100, steady, lcg());
+    expect(a!.start).toBe(0);
+    expect(b!.start).toBeGreaterThan(a!.start);
+  });
+
+  test('a hesitant hand stops now and then', () => {
+    const many = Array.from({ length: 40 }, (_, i) => ({ start: i, duration: 1, path: line(i * 100, i * 100 + 50, 0) }));
+    const calm = handTimes(many, 100, steady, lcg()).at(-1)!;
+    const unsure = handTimes(many, 100, { ...steady, hesitate: 1 }, lcg()).at(-1)!;
+    expect(unsure.start).toBeGreaterThan(calm.start + 0.5);
+  });
+});
+
+describe('sweep', () => {
+  const at = (x: number, y: number, seed = 0) => ({ path: line(x, x + 10, y), seed });
+  const random = (k: number) => lcg(k + 1);
+
+  test('a wipe goes left to right, a rise bottom to top, from the middle out', () => {
+    const strokes = [at(100, 0), at(0, 0), at(50, 50)];
+    expect(sweepOrder(strokes, 'wipe', random)).toEqual([1, 0, 0.5]);
+    expect(sweepOrder(strokes, 'rise', random)).toEqual([1, 1, 0]);
+    const center = sweepOrder([at(0, 0), at(50, 0), at(100, 0)], 'center', random);
+    expect(center[1]).toBe(0);
+    expect(center[0]).toBe(1);
+  });
+
+  test('all at once, every stroke starts together; scattered, glyph by glyph', () => {
+    expect(sweepOrder([at(0, 0), at(90, 0)], 'together', random)).toEqual([0, 0]);
+    const [a, b, c] = sweepOrder([at(0, 0, 1), at(10, 0, 1), at(20, 0, 2)], 'scatter', random);
+    expect(a).toBe(b!);
+    expect(a).not.toBe(c!);
+  });
+
+  test('the sweep takes its time across the text, each stroke its own draw', () => {
+    expect(sweepTimes([0, 0.5, 1], 2, 0.3)).toEqual([
+      { start: 0, duration: 0.3 },
+      { start: 1, duration: 0.3 },
+      { start: 2, duration: 0.3 },
+    ]);
   });
 });

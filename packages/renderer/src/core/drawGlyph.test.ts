@@ -3,6 +3,7 @@ import type { ResolvedEffect } from '../lib/effects.ts';
 import { placementsToSvg, type SvgExportConfig } from '../lib/svgExport.ts';
 import type { LineCap, TegakiGlyphData } from '../types.ts';
 import { drawGlyph } from './drawGlyph.ts';
+import type { TegakiPlugin } from './types.ts';
 
 // A bent stroke of three segments whose width varies, so pressure draws it segment by segment.
 const glyph: TegakiGlyphData = {
@@ -134,5 +135,23 @@ describe('paint sees every stroke', () => {
       { name: 'stamp', paint: (s, next) => next({ ...s, stroke: { ...s.stroke, state: 'done', progress: 1 } }) },
     ]);
     expect(rec.caps.length).toBeGreaterThan(0);
+  });
+});
+
+describe('timing', () => {
+  test("a timing hook retimes the glyph's strokes", () => {
+    const states: string[] = [];
+    const later: TegakiPlugin = {
+      name: 'later',
+      timing: ({ strokes }) => ({ strokes: strokes.map((s) => ({ start: s.start + 1, duration: s.duration })) }),
+      paint: (s, next) => {
+        states.push(s.stroke.state);
+        next(s);
+      },
+    };
+    for (const time of [0.5, 1.5, 2.5]) {
+      drawGlyph(recordingContext().ctx, glyph, pos, time, 'round', '#000', [], 0, undefined, linear, 1, undefined, undefined, 1, [later]);
+    }
+    expect(states).toEqual(['pending', 'drawing', 'done']);
   });
 });

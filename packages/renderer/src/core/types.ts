@@ -1,6 +1,6 @@
 import type { StrokePaint } from '../lib/paintStroke.ts';
 import type { Box, StrokePath } from '../lib/strokePath.ts';
-import type { GlyphPlacement, PlacedStroke, StrokeGeometryContext, TegakiFrame } from '../lib/strokeTimeline.ts';
+import type { GlyphPlacement, PlacedStroke, StrokeGeometryContext, StrokeTime, TegakiFrame } from '../lib/strokeTimeline.ts';
 import type { Timeline, TimelineConfig } from '../lib/timeline.ts';
 import type { TegakiBundle, TegakiEffects } from '../types.ts';
 
@@ -273,6 +273,22 @@ export interface TegakiBoundsContext {
   fontSize: number;
 }
 
+/** What a `timing` hook retimes. */
+export interface TegakiTimingContext {
+  /**
+   * Every placed stroke, in drawing order, at the `start` and `duration`
+   * (timeline seconds) the `timing` hooks before this one gave it — the
+   * first gets the timeline's. Read those rather than `entry`'s times.
+   */
+  strokes: readonly PlacedStroke[];
+  /** Seconds the timeline runs: to the last stroke's end, and any pause after. */
+  duration: number;
+  /** Font size in px. */
+  fontSize: number;
+  /** See {@link TegakiPluginContext.random}. */
+  random(key: string | number): () => number;
+}
+
 /**
  * Paints alongside the handwriting, reshapes it, or reacts to it. Every hook
  * is optional. The built-in effects are plugins too, run before these, so a
@@ -291,6 +307,20 @@ export interface TegakiPlugin {
    * path of one point.
    */
   geometry?(path: StrokePath, ctx: TegakiGeometryContext): StrokePath;
+  /**
+   * Retime the handwriting: when each stroke starts and how long it takes.
+   * Called once per layout, with every stroke placed (so where it is can
+   * decide when it draws: a sweep, the pen's travel from the stroke before).
+   * Return one `{ start, duration }` per stroke, in the order given, and the
+   * timeline's new `duration` if it should change otherwise than with its
+   * last stroke (a pause at the end, time for an effect to finish). The
+   * engine's `duration`, the pen, `onComplete`, CSS time and `toSVG` all
+   * follow; each glyph's easing runs over the time its strokes now span, and
+   * characters drawn from the fallback font keep their distance from the
+   * glyph before them. Hooks run in order, each on the times the one before
+   * returned.
+   */
+  timing?(ctx: TegakiTimingContext): { strokes: readonly StrokeTime[]; duration?: number } | undefined;
   /**
    * Reshape a glyph outline contour (points in px) the way `geometry`
    * reshapes the glyph's strokes, for clip-to-text: a wobble moves the

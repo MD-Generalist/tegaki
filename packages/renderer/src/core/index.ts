@@ -32,6 +32,7 @@ export {
   type StrokeNib,
   type StrokeProgress,
   type StrokeState,
+  type StrokeTime,
   type StrokeTiming,
   sampleFrame,
   sampleStroke,
@@ -88,6 +89,7 @@ export type {
   TegakiQuality,
   TegakiStrokePaintContext,
   TegakiSvgOptions,
+  TegakiTimingContext,
   TimeControlMode,
   TimeControlProp,
 } from './types.ts';
