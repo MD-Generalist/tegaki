@@ -353,6 +353,19 @@ export function bundleWeightsOf(state: Pick<UrlState, 'fontWeight' | 'bundleWeig
   return [...new Set([...state.bundleWeights, state.fontWeight])].sort((a, b) => a - b);
 }
 
+/**
+ * The weights after drawing in `weight`: a bundle of several keeps the weight
+ * drawn so far beside the new one, while a bundle of only the drawn weight
+ * follows it.
+ */
+export function withDrawnWeight(
+  state: Pick<UrlState, 'fontWeight' | 'bundleWeights'>,
+  weight: number,
+): Pick<UrlState, 'fontWeight' | 'bundleWeights'> {
+  const inBundle = bundleWeightsOf(state);
+  return { fontWeight: weight, bundleWeights: inBundle.length > 1 ? bundleWeightsOf({ fontWeight: weight, bundleWeights: inBundle }) : [] };
+}
+
 /** Read URL state from the given search params (defaults to the current location). Returns only overrides (merged with defaults). */
 export function parseUrlState(search: string | URLSearchParams = window.location.search): UrlState {
   const p = new URLSearchParams(search);

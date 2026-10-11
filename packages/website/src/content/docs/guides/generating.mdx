@@ -49,7 +49,7 @@ bun start generate --stroke-font EMSAllure.svg --pen-width 0.06 -o output/ems-al
 
 A bundle can hold several weights of a font. Each weight is traced on its own, and the renderer draws the one the text's `font-weight` picks (see [`font`](/api/renderer/#font)).
 
-In the studio, open **Pipeline → Weights** while a Google font is loaded. **Draw in** picks the weight the studio loads, draws and inspects, and the chips pick the weights **Export → Download bundle** writes. The weight drawn is always one of them.
+In the studio, with a Google font loaded, **Style → Text → Weight** picks the weight the studio loads, draws and inspects, and the chips in **Pipeline → Weights** pick the weights **Export → Download bundle** writes. The weight drawn is always one of them.
 
 From the CLI, list the weights of a Google font, or add other files of a local font:
 

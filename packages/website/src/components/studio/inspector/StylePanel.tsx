@@ -9,18 +9,29 @@ import {
   type EffectsState,
   URL_DEFAULTS,
   type UrlState,
+  withDrawnWeight,
 } from '../../url-state.ts';
 import { CheckIcon, CopyIcon, MinusIcon, PlusIcon } from '../icons.tsx';
 import type { SetSetting } from '../state.ts';
 import { IconButton, Section } from '../ui.tsx';
 import { ColorStops, DialScope, SeedControl, SmallIconButton, ToggleGroup } from './dial.tsx';
+import { weightLabel } from './weights.ts';
 
 /** Where the line-height slider starts when switched on from the font's `normal`. */
 const CUSTOM_LINE_HEIGHT = 1.2;
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
-export function StylePanel({ settings, set }: { settings: UrlState; set: SetSetting }) {
+export function StylePanel({
+  settings,
+  set,
+  fontWeights,
+}: {
+  settings: UrlState;
+  set: SetSetting;
+  /** Every weight the loaded font's family comes in; null for a font that is only its file. */
+  fontWeights: number[] | null;
+}) {
   const { effectsState: fx, customEffects, quality } = settings;
   const [copied, setCopied] = useState(false);
 
@@ -45,7 +56,14 @@ export function StylePanel({ settings, set }: { settings: UrlState; set: SetSett
 
   const clipDefault = defaultClipText(settings.pipeline);
   const clipScale = typeof quality.clipText === 'number' ? quality.clipText : 1;
+  // Another weight is another file of the family, loaded and traced as the font is.
+  const drawIn = (weight: number) => {
+    const next = withDrawnWeight(settings, weight);
+    set('bundleWeights', next.bundleWeights);
+    set('fontWeight', next.fontWeight);
+  };
   const textModified =
+    settings.fontWeight !== URL_DEFAULTS.fontWeight ||
     settings.fontSizePx !== URL_DEFAULTS.fontSizePx ||
     settings.lineHeightRatio !== URL_DEFAULTS.lineHeightRatio ||
     settings.letterSpacingPx !== URL_DEFAULTS.letterSpacingPx;
@@ -64,6 +82,7 @@ export function StylePanel({ settings, set }: { settings: UrlState; set: SetSett
         title="Text"
         modified={textModified}
         onReset={() => {
+          if (settings.fontWeight !== URL_DEFAULTS.fontWeight) drawIn(URL_DEFAULTS.fontWeight);
           set('fontSizePx', URL_DEFAULTS.fontSizePx);
           set('lineHeightRatio', URL_DEFAULTS.lineHeightRatio);
           set('letterSpacingPx', URL_DEFAULTS.letterSpacingPx);
@@ -71,6 +90,14 @@ export function StylePanel({ settings, set }: { settings: UrlState; set: SetSett
       >
         <DialScope className="flex flex-col gap-1.5">
           <Slider label="Size" value={settings.fontSizePx} min={16} max={256} step={1} unit="px" onChange={(v) => set('fontSizePx', v)} />
+          {fontWeights && fontWeights.length > 1 && (
+            <SelectControl
+              label="Weight"
+              value={String(settings.fontWeight)}
+              options={fontWeights.map((w) => ({ value: String(w), label: weightLabel(w) }))}
+              onChange={(v) => drawIn(Number(v))}
+            />
+          )}
           <ToggleGroup
             label="Custom line height"
             checked={settings.lineHeightRatio !== null}

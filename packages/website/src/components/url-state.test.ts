@@ -1,7 +1,7 @@
 /// <reference types="bun" />
 import { describe, expect, test } from 'bun:test';
 import { DEFAULT_CHARS, type GeometryOptions, KOREAN_CHARS, SIMPLIFIED_CHINESE_CHARS } from 'tegaki-generator';
-import { buildUrlParams, bundleWeightsOf, defaultClipText, parseUrlState, URL_DEFAULTS } from './url-state.ts';
+import { buildUrlParams, bundleWeightsOf, defaultClipText, parseUrlState, URL_DEFAULTS, withDrawnWeight } from './url-state.ts';
 
 describe('parseUrlState', () => {
   test('invalid gs value falls back to the default geometry stage instead of poisoning state', () => {
@@ -289,6 +289,14 @@ describe('font weights', () => {
   test('a bundle of one weight leaves bw out of the URL', () => {
     expect(buildUrlParams(parseUrlState('?fw=700&bw=700')).has('bw')).toBe(false);
     expect(buildUrlParams(parseUrlState('?bw=700,400')).get('bw')).toBe('400,700');
+  });
+
+  test('drawing in another weight keeps a bundle of several, and moves a bundle of one', () => {
+    expect(withDrawnWeight({ fontWeight: 400, bundleWeights: [400, 700] }, 600)).toEqual({
+      fontWeight: 600,
+      bundleWeights: [400, 600, 700],
+    });
+    expect(withDrawnWeight({ fontWeight: 400, bundleWeights: [] }, 700)).toEqual({ fontWeight: 700, bundleWeights: [] });
   });
 
   test('what is not a weight is dropped', () => {

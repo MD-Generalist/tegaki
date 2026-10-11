@@ -83,7 +83,7 @@ export function Inspector({
         )}
       </div>
       <div className="studio-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain" role="tabpanel">
-        {tab === 'style' && <StylePanel settings={settings} set={set} />}
+        {tab === 'style' && <StylePanel settings={settings} set={set} fontWeights={fontWeights} />}
         {tab === 'motion' && <MotionPanel settings={settings} set={set} />}
         {tab === 'plugins' && <PluginsPanel settings={settings} set={set} />}
         {tab === 'pipeline' && (
