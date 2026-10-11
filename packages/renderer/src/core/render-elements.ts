@@ -8,6 +8,12 @@ import type { CreateElementFn, TegakiEngineOptions } from './types.ts';
 export const PAD_V_CSS = 'max(0.2em, 0.9em - 0.5lh)';
 
 /**
+ * The sentinel's transitions: each inherited style the engine reads ends one
+ * (after a millisecond), so a class toggled anywhere above reaches it.
+ */
+export const SENTINEL_TRANSITION = 'font-size 0.001s, line-height 0.001s, color 0.001s, letter-spacing 0.001s, font-weight 0.001s';
+
+/**
  * The canvas's box: the text box padded by 0.2em horizontally and `PAD_V_CSS`
  * vertically, grown per side by `overflow` px where the strokes reach further
  * (a stem running past a letter's advance under negative letter-spacing, a
@@ -58,6 +64,9 @@ export function buildRootProps(options: TegakiEngineOptions): Record<string, any
       width: 'auto',
       height: 'auto',
       fontFamily,
+      // The strokes are of the face the weight picks (see `TegakiBundle.faces`),
+      // never a bold the browser makes up from a lighter one.
+      fontSynthesisWeight: 'none',
       direction: options.direction ?? undefined,
       [CSS_DURATION]: duration,
       [CSS_TIME]: time,
@@ -86,9 +95,7 @@ export function buildChildren<T>(options: TegakiEngineOptions, h: CreateElementF
         lineHeight: 'inherit',
         letterSpacing: 'inherit',
         visibility: 'hidden',
-        transition: isCss
-          ? `font-size 0.001s, line-height 0.001s, color 0.001s, letter-spacing 0.001s, ${CSS_PROGRESS} 0.001s`
-          : 'font-size 0.001s, line-height 0.001s, color 0.001s, letter-spacing 0.001s',
+        transition: isCss ? `${SENTINEL_TRANSITION}, ${CSS_PROGRESS} 0.001s` : SENTINEL_TRANSITION,
       },
     }),
     h(

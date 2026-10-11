@@ -183,6 +183,18 @@ export const generateArgsSchema = pipelineOptionsSchema.extend(geometryOptionsSc
       'Stroke extraction: `geometry` traces strokes from the outline itself (ordered by KanjiVG / Hershey references where they match); `raster` rasterizes and skeletonizes, tuned by the bitmap options',
     )
     .meta({ flags: 'p' }),
+  weights: z
+    .array(z.string())
+    .default([])
+    .describe(
+      "Weights of a Google font to put in the bundle (`--weights 400,700`), each downloaded and traced on its own; the first is the bundle's own face, the rest its `faces`, and the renderer draws the one the text's font-weight picks",
+    ),
+  weightFile: z
+    .array(z.string())
+    .default([])
+    .describe(
+      "With --font-file: another weight of the font from this TTF/OTF file (its weight from the font's OS/2 table), put in the bundle beside --font-file's; repeat for more",
+    ),
   output: z.string().optional().describe('Output folder path for the font bundle').meta({ flags: 'o' }),
   chars: z
     .union([z.boolean(), z.string()])
@@ -311,6 +323,8 @@ export interface ExtractBundleInput {
 
 export interface TegakiBundleOutput {
   fontOutput: FontOutput;
+  /** What its `bundle.ts` was written from — for {@link combineWeightBundles}. */
+  module: GlyphsModuleArgs;
   glyphResults: Record<string, PipelineResult>;
   /** Variant glyph pipeline results keyed by opentype glyph id (as string). */
   glyphResultsById: Record<string, PipelineResult>;
@@ -803,25 +817,24 @@ export async function extractTegakiBundle(input: ExtractBundleInput): Promise<Te
     files.push({ path: fullFontFileName, content: new Uint8Array(fullFontBuffer) });
   }
 
-  files.push({
-    path: 'bundle.ts',
-    content: generateGlyphsModule({
-      fontFileName,
-      fontFamily: bundleFamily,
-      fullFamily,
-      fullFontFileName: subset && fullFontFileName ? fullFontFileName : undefined,
-      extraFonts: extraFonts.map(({ fileName, range }) => ({ fileName, range })),
-      lineCap,
-      unitsPerEm: fontInfo.unitsPerEm,
-      ascender: fontInfo.ascender,
-      descender: fontInfo.descender,
-      hasVariants,
-      features: hasVariants && bundleFeatures.length > 0 ? bundleFeatures : undefined,
-    }),
-  });
+  const module: GlyphsModuleArgs = {
+    fontFileName,
+    fontFamily: bundleFamily,
+    fullFamily,
+    fullFontFileName: subset && fullFontFileName ? fullFontFileName : undefined,
+    extraFonts: extraFonts.map(({ fileName, range }) => ({ fileName, range })),
+    lineCap,
+    unitsPerEm: fontInfo.unitsPerEm,
+    ascender: fontInfo.ascender,
+    descender: fontInfo.descender,
+    hasVariants,
+    features: hasVariants && bundleFeatures.length > 0 ? bundleFeatures : undefined,
+  };
+  files.push({ path: 'bundle.ts', content: generateGlyphsModule(module) });
 
   return {
     fontOutput: output,
+    module,
     glyphResults,
     glyphResultsById,
     ...(geometry ? { geometryResults, geometryResultsById } : {}),
@@ -836,7 +849,19 @@ export function extraFontFileName(fontFileName: string, subsetIndex: number): st
   return dot > 0 ? `${fontFileName.slice(0, dot)}-${subsetIndex}${fontFileName.slice(dot)}` : `${fontFileName}-${subsetIndex}.ttf`;
 }
 
-export function generateGlyphsModule(args: {
+/** A weight of the font beside the bundle's own, as {@link combineWeightBundles} lays out its files. */
+export interface GlyphsModuleFace {
+  weight: number;
+  fontFileName: string;
+  fullFontFileName: string | undefined;
+  extraFonts: { fileName: string; range: string }[];
+  glyphDataFileName: string;
+  /** Set when the face has variant glyphs. */
+  glyphDataByIdFileName: string | undefined;
+}
+
+/** What a bundle module is written from (see {@link generateGlyphsModule}). */
+export interface GlyphsModuleArgs {
   fontFileName: string;
   fontFamily: string;
   fullFamily: string | undefined;
@@ -849,7 +874,13 @@ export function generateGlyphsModule(args: {
   descender: number;
   hasVariants: boolean;
   features: string[] | undefined;
-}): string {
+  /** The weight of the bundle's own face, when the bundle says it. */
+  weight?: number;
+  /** The font's other weights. */
+  faces?: GlyphsModuleFace[];
+}
+
+export function generateGlyphsModule(args: GlyphsModuleArgs): string {
   const {
     fontFileName,
     fontFamily,
@@ -862,22 +893,63 @@ export function generateGlyphsModule(args: {
     descender,
     hasVariants,
     features,
+    weight,
+    faces = [],
   } = args;
   const esc = (s: string) => s.replace(/'/g, "\\'");
-  const hasFull = fullFamily && fullFontFileName;
+  const hasFull = !!(fullFamily && fullFontFileName);
 
-  const imports = [`import fontUrl from './${fontFileName}' with { type: 'url' };`];
-  if (hasFull) imports.push(`import fullFontUrl from './${fullFontFileName}' with { type: 'url' };`);
-  imports.push(...extraFonts.map(({ fileName }, i) => `import extraFontUrl${i + 1} from './${fileName}' with { type: 'url' };`));
-  imports.push(`import glyphData from './glyphData.json' with { type: 'json' };`);
-  if (hasVariants) imports.push(`import glyphDataById from './glyphDataById.json' with { type: 'json' };`);
+  const imports: string[] = [];
+  const fontFaceRules: string[] = [];
+  const url = (name: string, file: string) => imports.push(`import ${name} from './${file}' with { type: 'url' };`);
+  const json = (name: string, file: string) => imports.push(`import ${name} from './${file}' with { type: 'json' };`);
+  // Each face's files under names suffixed by its weight; its @font-face rules
+  // carry the weight when the bundle states one, so the browser picks it as the engine does.
+  const face = (
+    suffix: string,
+    f: { weight?: number; fontFileName: string; fullFontFileName: string | undefined; extraFonts: { fileName: string; range: string }[] },
+  ) => {
+    const w = f.weight === undefined ? '' : ` font-weight: ${f.weight};`;
+    url(`fontUrl${suffix}`, f.fontFileName);
+    fontFaceRules.push(`@font-face { font-family: '${esc(fontFamily)}'; src: url(\${fontUrl${suffix}});${w} }`);
+    f.extraFonts.forEach(({ fileName, range }, i) => {
+      url(`extraFontUrl${suffix}${suffix ? '_' : ''}${i + 1}`, fileName);
+      if (range)
+        fontFaceRules.push(
+          `@font-face { font-family: '${esc(fontFamily)}'; src: url(\${extraFontUrl${suffix}${suffix ? '_' : ''}${i + 1}}); unicode-range: ${range};${w} }`,
+        );
+    });
+    if (hasFull && f.fullFontFileName) {
+      url(`fullFontUrl${suffix}`, f.fullFontFileName);
+      fontFaceRules.push(`@font-face { font-family: '${esc(fullFamily!)}'; src: url(\${fullFontUrl${suffix}});${w} }`);
+    }
+  };
+  const extraUrls = (suffix: string, f: { extraFonts: { fileName: string; range: string }[] }) =>
+    f.extraFonts.map((_, i) => `extraFontUrl${suffix}${suffix ? '_' : ''}${i + 1}`).join(', ');
 
-  const fontFaceRules = [`@font-face { font-family: '${esc(fontFamily)}'; src: url(\${fontUrl}); }`];
-  extraFonts.forEach(({ range }, i) => {
-    if (range)
-      fontFaceRules.push(`@font-face { font-family: '${esc(fontFamily)}'; src: url(\${extraFontUrl${i + 1}}); unicode-range: ${range}; }`);
+  face('', { weight, fontFileName, fullFontFileName, extraFonts });
+  json('glyphData', 'glyphData.json');
+  if (hasVariants) json('glyphDataById', 'glyphDataById.json');
+  for (const f of faces) {
+    face(String(f.weight), f);
+    json(`glyphData${f.weight}`, f.glyphDataFileName);
+    if (f.glyphDataByIdFileName) json(`glyphDataById${f.weight}`, f.glyphDataByIdFileName);
+  }
+
+  const faceProps = faces.map((f) => {
+    const w = f.weight;
+    const fields = [
+      `weight: ${w}`,
+      `fontUrl: fontUrl${w}`,
+      ...(hasFull && f.fullFontFileName ? [`fullFontUrl: fullFontUrl${w}`] : []),
+      ...(f.extraFonts.length
+        ? [`extraFontUrls: [${extraUrls(String(w), f)}]`, `extraFontRanges: ${JSON.stringify(f.extraFonts.map((x) => x.range))}`]
+        : []),
+      `glyphData: glyphData${w}`,
+      ...(f.glyphDataByIdFileName ? [`glyphDataById: glyphDataById${w}`] : []),
+    ];
+    return `    { ${fields.join(', ')} },`;
   });
-  if (hasFull) fontFaceRules.push(`@font-face { font-family: '${esc(fullFamily)}'; src: url(\${fullFontUrl}); }`);
 
   const props = [
     `  version: ${BUNDLE_VERSION},`,
@@ -887,10 +959,7 @@ export function generateGlyphsModule(args: {
     `  fontUrl,`,
     ...(hasFull ? [`  fullFontUrl,`] : []),
     ...(extraFonts.length
-      ? [
-          `  extraFontUrls: [${extraFonts.map((_, i) => `extraFontUrl${i + 1}`).join(', ')}],`,
-          `  extraFontRanges: ${JSON.stringify(extraFonts.map((f) => f.range))},`,
-        ]
+      ? [`  extraFontUrls: [${extraUrls('', { extraFonts })}],`, `  extraFontRanges: ${JSON.stringify(extraFonts.map((f) => f.range))},`]
       : []),
     `  fontFaceCSS: \`${fontFaceRules.join(' ')}\`,`,
     `  unitsPerEm: ${unitsPerEm},`,
@@ -899,6 +968,8 @@ export function generateGlyphsModule(args: {
     `  glyphData,`,
     ...(hasVariants ? [`  glyphDataById,`] : []),
     ...(features?.length ? [`  features: ${JSON.stringify(features)},`] : []),
+    ...(weight === undefined ? [] : [`  weight: ${weight},`]),
+    ...(faces.length ? ['  faces: [', ...faceProps, '  ],'] : []),
   ];
 
   return `// Auto-generated by Tegaki. Do not edit manually.
@@ -910,4 +981,63 @@ ${props.join('\n')}
 
 export default bundle;
 `;
+}
+
+/** `caveat.ttf` → `caveat-700.ttf`: a file of the face of that weight in a bundle of several. */
+export function weightFileName(fileName: string, weight: number): string {
+  const dot = fileName.lastIndexOf('.');
+  return dot > 0 ? `${fileName.slice(0, dot)}-${weight}${fileName.slice(dot)}` : `${fileName}-${weight}`;
+}
+
+/**
+ * One bundle of several weights of a font, from a bundle extracted for each
+ * (the same characters and options): the first is the bundle's own face —
+ * what a renderer that predates weights draws — and the rest its `faces`,
+ * their files named after the first's with `-<weight>` (`caveat-700.ttf`,
+ * `glyphData-700.json`). Family, metrics and features are the first's.
+ */
+export function combineWeightBundles(weights: readonly { weight: number; bundle: TegakiBundleOutput }[]): BundleFile[] {
+  const [own, ...rest] = weights;
+  if (!own) throw new Error('combineWeightBundles: no weights');
+  const seen = new Set<number>();
+  for (const { weight } of weights) {
+    if (seen.has(weight)) throw new Error(`combineWeightBundles: weight ${weight} given twice`);
+    seen.add(weight);
+  }
+  const files = own.bundle.files.filter((f) => f.path !== 'bundle.ts');
+  const faces: GlyphsModuleFace[] = [];
+  for (const { weight, bundle } of rest) {
+    const m = bundle.module;
+    const fontFileName = weightFileName(own.bundle.module.fontFileName, weight);
+    const fullFontFileName = m.fullFontFileName && weightFileName(own.bundle.module.fullFontFileName ?? m.fullFontFileName, weight);
+    const glyphDataFileName = weightFileName('glyphData.json', weight);
+    const glyphDataByIdFileName = m.hasVariants ? weightFileName('glyphDataById.json', weight) : undefined;
+    const extraFonts = m.extraFonts.map(({ range }, i) => ({ fileName: extraFontFileName(fontFileName, i + 1), range }));
+    const renamed = new Map<string, string>([
+      [m.fontFileName, fontFileName],
+      ['glyphData.json', glyphDataFileName],
+      ...m.extraFonts.map((f, i): [string, string] => [f.fileName, extraFonts[i]!.fileName]),
+    ]);
+    if (m.fullFontFileName && fullFontFileName) renamed.set(m.fullFontFileName, fullFontFileName);
+    if (glyphDataByIdFileName) renamed.set('glyphDataById.json', glyphDataByIdFileName);
+    for (const file of bundle.files) {
+      const path = renamed.get(file.path);
+      if (path) files.push({ path, content: file.content });
+    }
+    faces.push({ weight, fontFileName, fullFontFileName, extraFonts, glyphDataFileName, glyphDataByIdFileName });
+  }
+  files.push({ path: 'bundle.ts', content: generateGlyphsModule({ ...own.bundle.module, weight: own.weight, faces }) });
+  return files;
+}
+
+/** `--weights` values (`400,700`, or the flag repeated) as weights 1–1000. */
+export function parseWeights(values: readonly string[]): number[] {
+  const weights = values
+    .flatMap((v) => v.split(','))
+    .map((v) => v.trim())
+    .filter(Boolean)
+    .map(Number);
+  for (const w of weights) if (!Number.isInteger(w) || w < 1 || w > 1000) throw new Error(`--weights: ${w} is not a font weight (1–1000)`);
+  if (new Set(weights).size !== weights.length) throw new Error('--weights: a weight is given twice');
+  return weights;
 }

@@ -43,3 +43,10 @@ export async function loadLocalFont(path: string, chars?: string): Promise<Local
   const fontFileName = chars === undefined ? basename(path) : `${slug}-${charsHash(chars)}.${ext}`;
   return { family, fontBuffer, fontFileName, fullFontFileName: `${slug}.${ext}` };
 }
+
+/** A font file's weight, from its OS/2 table (400 when it has none). */
+export async function fontFileWeight(path: string): Promise<number> {
+  const font = opentype.parse(await Bun.file(path).arrayBuffer());
+  const weight = (font.tables.os2 as { usWeightClass?: number } | undefined)?.usWeightClass;
+  return weight && weight >= 1 && weight <= 1000 ? weight : 400;
+}

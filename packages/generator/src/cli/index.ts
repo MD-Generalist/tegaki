@@ -1,17 +1,21 @@
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import * as opentype from 'opentype.js';
 import { createPadrone, padroneProgress } from 'padrone';
 import * as z from 'zod/v4';
 import { JAPANESE_CHARS } from '../charsets.ts';
 import { formatCoverageSummary, runCoverageReport } from '../commands/coverage-report.ts';
 import {
+  type BundleFile,
+  combineWeightBundles,
   extractTegakiBundle,
   generateArgsSchema,
   geometryOptionsSchema,
   type PipelineOptions,
   parseFont,
+  parseWeights,
   pickGeometryOptions,
+  type TegakiBundleOutput,
 } from '../commands/generate.ts';
 import {
   compareScoreboards,
@@ -23,8 +27,8 @@ import {
 import { formatStrokeOrderSummary, runStrokeOrderReport } from '../commands/stroke-order-report.ts';
 import { DEFAULT_CHARS, DEFAULT_FONT_FAMILY } from '../constants.ts';
 import { writeDebugOutput, writeGeometryDebugOutput } from '../debug/output.ts';
-import { downloadFont } from '../font/download.ts';
-import { loadLocalFont } from '../font/local.ts';
+import { bundleFontFileName, downloadFont } from '../font/download.ts';
+import { fontFileWeight, loadLocalFont } from '../font/local.ts';
 import { enumerateFontChars } from '../font/parse.ts';
 import { initStraightSkeleton } from '../geometry/face-straight-skeleton.ts';
 import type { GeometryOptions } from '../geometry/types.ts';
@@ -87,7 +91,7 @@ const fontFileArg = z
  * return several CJK subset files).
  */
 async function resolveFont(
-  source: { family?: string; fontFile?: string; force: boolean },
+  source: { family?: string; fontFile?: string; force: boolean; weight?: number },
   chars: string | undefined,
   defaultFamily: string,
 ): Promise<{
@@ -104,10 +108,10 @@ async function resolveFont(
     return { ...(await loadLocalFont(source.fontFile, chars)), local: true };
   }
   const family = source.family ?? defaultFamily;
-  const fontPaths = await downloadFont(family, { force: source.force, chars });
+  const fontPaths = await downloadFont(family, { force: source.force, chars, weight: source.weight });
   const fontBuffer = await Bun.file(fontPaths[0]!).arrayBuffer();
   const extraFontBuffers = fontPaths.length > 1 ? await Promise.all(fontPaths.slice(1).map((p) => Bun.file(p).arrayBuffer())) : undefined;
-  return { family, fontBuffer, extraFontBuffers, fontFileName: basename(fontPaths[0]!), local: false };
+  return { family, fontBuffer, extraFontBuffers, fontFileName: bundleFontFileName(fontPaths[0]!, source.weight), local: false };
 }
 
 export const tegakiProgram = createPadrone('tegaki')
@@ -152,6 +156,8 @@ export const tegakiProgram = createPadrone('tegaki')
           referenceFile,
           strokeFont,
           penWidth,
+          weights,
+          weightFile,
           ...pipelineOptions
         } = args;
 
@@ -177,75 +183,118 @@ export const tegakiProgram = createPadrone('tegaki')
         // chars: false → DEFAULT_CHARS
         // chars: string → use as-is
         const downloadChars = typeof chars === 'string' ? chars : chars === false ? DEFAULT_CHARS : undefined;
-
-        // Download or read the font (Google Fonts may return multiple subset files for CJK fonts)
-        progress?.update(fontFile ? `Reading font "${fontFile}"...` : `Downloading font "${familyArg ?? DEFAULT_FONT_FAMILY}"...`);
-        const {
-          family,
-          fontBuffer,
-          extraFontBuffers,
-          fontFileName,
-          fullFontFileName: localFullFileName,
-          local,
-        } = await resolveFont({ family: familyArg, fontFile, force }, downloadChars, DEFAULT_FONT_FAMILY);
-
-        // When generating a subset of a Google font, also download the full
-        // font so the bundle can include it as a CSS fallback for
-        // non-generated characters. A local font ships only its subset unless
-        // --full-font asks for the file too: the fonts that need --font-file
-        // (CJK) are tens of megabytes whole.
         const isSubset = chars !== true;
-        let fullFontBuffer: ArrayBuffer | undefined;
-        let fullFontFileName: string | undefined;
-        if (isSubset && local && fullFont) {
-          fullFontBuffer = await Bun.file(fontFile!).arrayBuffer();
-          fullFontFileName = localFullFileName;
-        } else if (isSubset && !local) {
-          const fullPaths = await downloadFont(family, { force });
-          fullFontBuffer = await Bun.file(fullPaths[0]!).arrayBuffer();
-          fullFontFileName = basename(fullPaths[0]!);
-        }
+        const geometryOptions = pickGeometryOptions(args);
+        const strokeOrderProviders =
+          pipeline === 'geometry' ? await referenceProviders(args.hanLocale, args.referenceDatasets, referenceFile) : [];
 
-        // Resolve the final char set. When true, enumerate every mapped codepoint
-        // from the downloaded font(s); otherwise use the explicit string.
-        let resolvedChars: string;
-        if (chars === true) {
-          const primary = opentype.parse(fontBuffer);
-          const extras = extraFontBuffers?.map((b) => opentype.parse(b));
-          resolvedChars = enumerateFontChars(primary, extras);
-          progress?.update(`Resolved ${[...resolvedChars].length} glyphs from "${family}"`);
-        } else {
-          resolvedChars = downloadChars!;
-        }
+        // The weights to bundle: a Google font's --weights, or --font-file and
+        // each --weight-file at the weight its OS/2 table states. One source
+        // with no weight asked for is a bundle as before, its weight unstated.
+        const weightList = parseWeights(weights);
+        if (weightFile.length > 0 && !fontFile) throw new Error('--weight-file adds a weight to --font-file');
+        if (fontFile && weightList.length > 0)
+          throw new Error('--weights is for Google fonts; add weights of a local font with --weight-file');
+        const sources: { fontFile?: string; weight?: number }[] = fontFile
+          ? await Promise.all(
+              [fontFile, ...weightFile].map(async (file) => ({
+                fontFile: file,
+                weight: weightFile.length > 0 ? await fontFileWeight(file) : undefined,
+              })),
+            )
+          : weightList.length > 0
+            ? weightList.map((weight) => ({ weight }))
+            : [{}];
 
-        // Extract bundle (pure — no file I/O)
-        progress?.update('Processing font...');
-        const bundle = await extractTegakiBundle({
-          fontBuffer,
-          fontFileName,
-          chars: resolvedChars,
-          options: pipelineOptions as PipelineOptions,
-          extraFontBuffers,
-          requestedFamily: family,
-          subset: isSubset,
-          fullFontBuffer,
-          fullFontFileName,
-          pipeline,
-          geometryOptions: pickGeometryOptions(args),
-          strokeOrderProviders:
-            pipeline === 'geometry' ? await referenceProviders(args.hanLocale, args.referenceDatasets, referenceFile) : [],
-          onProgress: (msg, p) => {
-            if (p !== undefined) {
-              progress?.update({ message: msg, progress: p });
+        let family = familyArg ?? DEFAULT_FONT_FAMILY;
+        let resolvedChars: string | undefined;
+        const extracted: { weight?: number; bundle: TegakiBundleOutput }[] = [];
+        for (const [index, source] of sources.entries()) {
+          const label = source.weight === undefined ? '' : ` (weight ${source.weight})`;
+          // Download or read the font (Google Fonts may return multiple subset files for CJK fonts)
+          progress?.update(
+            source.fontFile ? `Reading font "${source.fontFile}"...` : `Downloading font "${familyArg ?? DEFAULT_FONT_FAMILY}"${label}...`,
+          );
+          const resolved = await resolveFont(
+            { family: familyArg, fontFile: source.fontFile, force, weight: source.weight },
+            downloadChars,
+            DEFAULT_FONT_FAMILY,
+          );
+          const { fontBuffer, extraFontBuffers, fontFileName, fullFontFileName: localFullFileName, local } = resolved;
+          if (index === 0) family = resolved.family;
+
+          // When generating a subset of a Google font, also download the full
+          // font so the bundle can include it as a CSS fallback for
+          // non-generated characters. A local font ships only its subset unless
+          // --full-font asks for the file too: the fonts that need --font-file
+          // (CJK) are tens of megabytes whole.
+          let fullFontBuffer: ArrayBuffer | undefined;
+          let fullFontFileName: string | undefined;
+          if (isSubset && local && fullFont) {
+            fullFontBuffer = await Bun.file(source.fontFile!).arrayBuffer();
+            fullFontFileName = localFullFileName;
+          } else if (isSubset && !local) {
+            const fullPaths = await downloadFont(family, { force, weight: source.weight });
+            fullFontBuffer = await Bun.file(fullPaths[0]!).arrayBuffer();
+            fullFontFileName = bundleFontFileName(fullPaths[0]!, source.weight);
+          }
+
+          // Resolve the final char set once, from the first weight. When true,
+          // enumerate every mapped codepoint from the downloaded font(s);
+          // otherwise use the explicit string.
+          if (resolvedChars === undefined) {
+            if (chars === true) {
+              const primary = opentype.parse(fontBuffer);
+              const extras = extraFontBuffers?.map((b) => opentype.parse(b));
+              resolvedChars = enumerateFontChars(primary, extras);
+              progress?.update(`Resolved ${[...resolvedChars].length} glyphs from "${family}"`);
             } else {
-              progress?.update(msg);
+              resolvedChars = downloadChars!;
             }
-          },
-        });
+          }
+
+          // Extract bundle (pure — no file I/O)
+          progress?.update(`Processing font${label}...`);
+          const bundle = await extractTegakiBundle({
+            fontBuffer,
+            fontFileName,
+            chars: resolvedChars,
+            options: pipelineOptions as PipelineOptions,
+            extraFontBuffers,
+            // Every weight takes the family the first one has.
+            requestedFamily: family,
+            subset: isSubset,
+            fullFontBuffer,
+            fullFontFileName,
+            pipeline,
+            geometryOptions,
+            strokeOrderProviders,
+            onProgress: (msg, p) => {
+              const message = `${msg}${label}`;
+              if (p !== undefined) {
+                progress?.update({ message, progress: p });
+              } else {
+                progress?.update(message);
+              }
+            },
+          });
+          extracted.push({ weight: source.weight, bundle });
+        }
+
+        const bundle = extracted[0]!.bundle;
+        const files: BundleFile[] =
+          extracted.length > 1 || extracted[0]!.weight !== undefined
+            ? combineWeightBundles(extracted.map(({ weight, bundle }) => ({ weight: weight!, bundle })))
+            : bundle.files;
+        const stats = {
+          processed: extracted.reduce((n, e) => n + e.bundle.stats.processed, 0),
+          skipped: extracted.reduce((n, e) => n + e.bundle.stats.skipped, 0),
+          variants: extracted.reduce((n, e) => n + e.bundle.stats.variants, 0),
+        };
 
         // Write bundle files to disk
         const outputDir = output ?? `output/${family.toLowerCase().replace(/\s+/g, '-')}`;
-        for (const file of bundle.files) {
+        for (const file of files) {
           const filePath = resolve(outputDir, file.path);
           mkdirSync(dirname(filePath), { recursive: true });
           await Bun.write(filePath, file.content);
@@ -263,8 +312,9 @@ export const tegakiProgram = createPadrone('tegaki')
           }
         }
 
-        progress?.succeed(`Processed ${bundle.stats.processed} glyphs (${bundle.stats.skipped} skipped). Output: ${outputDir}`);
-        return { outputDir, ...bundle.stats };
+        const weightNote = extracted.length > 1 ? ` in ${extracted.length} weights` : '';
+        progress?.succeed(`Processed ${stats.processed} glyphs${weightNote} (${stats.skipped} skipped). Output: ${outputDir}`);
+        return { outputDir, ...stats };
       }),
   )
   .command('stroke-order-report', (c) =>

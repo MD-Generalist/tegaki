@@ -184,4 +184,33 @@ export interface TegakiBundle {
    * were generated.
    */
   features?: readonly string[];
+  /**
+   * The weight of the face the fields above describe (`font-weight`, 1–1000).
+   * Absent means 400.
+   */
+  weight?: number;
+  /**
+   * The font's other weights, each with its own files and strokes. The engine
+   * reads the text's computed `font-weight` and draws with the face CSS font
+   * matching picks among these and the bundle's own, so a bold parent writes
+   * in the bold strokes. Every face shares the bundle's family, metrics and
+   * features.
+   */
+  faces?: readonly TegakiFace[];
+}
+
+/**
+ * One weight of a bundle's font beside the bundle's own (see
+ * {@link TegakiBundle.faces}): the fields of {@link TegakiBundle} that differ
+ * from one weight to another.
+ */
+export interface TegakiFace {
+  /** `font-weight` of this face, 1–1000. */
+  weight: number;
+  fontUrl: string;
+  extraFontUrls?: readonly string[];
+  extraFontRanges?: readonly string[];
+  fullFontUrl?: string;
+  glyphData: Record<string, TegakiGlyphData>;
+  glyphDataById?: Record<string, TegakiGlyphData>;
 }

@@ -15,6 +15,7 @@ import { placementsToSvg, type SvgGlyphOutline, type SvgGlyphPlacement, type Svg
 import { headlessShapedLayout } from './textLayout.ts';
 import { computeTimeline, type TimelineConfig } from './timeline.ts';
 import { graphemes, lookupGlyphData } from './utils.ts';
+import { bundleForWeight } from './weights.ts';
 
 /** Animation flavour of the emitted SVG. */
 export type TextToSvgMode =
@@ -34,6 +35,12 @@ export interface TextToSvgOptions {
   letterSpacing?: number;
   /** Stroke color (any CSS color). Default `#1a1a1a`. */
   color?: string;
+  /**
+   * The `font-weight` to write in: a bundle with several weights (`faces`)
+   * draws the face CSS font matching picks for it. Default: the bundle's own
+   * face. A `shaper` must be built from that face (`bundleForWeight`).
+   */
+  fontWeight?: number;
   /** Animation flavour. Default `'loop'`. */
   mode?: TextToSvgMode;
   /**
@@ -177,7 +184,8 @@ function charGlyphs(shaper: BundleShaper, char: string, cache: Map<string, CharG
  * Characters the bundle has no strokes for are left out — the engine draws
  * them from the fallback font.
  */
-export function textToSvg(text: string, font: TegakiBundle, options: TextToSvgOptions = {}): string {
+export function textToSvg(text: string, bundle: TegakiBundle, options: TextToSvgOptions = {}): string {
+  const font = options.fontWeight === undefined ? bundle : bundleForWeight(bundle, options.fontWeight);
   const fontSize = options.fontSize ?? 100;
   const mode = options.mode ?? 'loop';
   const color = options.color ?? '#1a1a1a';

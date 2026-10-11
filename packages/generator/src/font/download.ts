@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { CACHE_DIR, charsHash } from '../constants.ts';
 
 function slugify(family: string): string {
@@ -17,6 +17,16 @@ function extractAllTtfUrls(css: string): string[] {
 }
 
 /**
+ * The name a downloaded file takes in a bundle: its cache name without the
+ * weight tag (`caveat-w700-1a2b.ttf` → `caveat-1a2b.ttf`); a bundle of several
+ * weights names its own (see `combineWeightBundles`).
+ */
+export function bundleFontFileName(path: string, weight?: number): string {
+  const name = basename(path);
+  return weight === undefined ? name : name.replace(`-w${weight}`, '');
+}
+
+/**
  * Download a Google Font, returning paths to all subset TTF files.
  *
  * For fonts with a single subset (most Latin fonts), returns one path.
@@ -24,10 +34,13 @@ function extractAllTtfUrls(css: string): string[] {
  * per Unicode range. When `chars` is provided, the `&text=` parameter limits
  * the response to only the subsets covering those characters, then all matching
  * subset files are downloaded.
+ *
+ * `weight` picks one weight of the family (Google serves it as a static
+ * instance, a variable font included); without it, the regular one.
  */
 export async function downloadFont(
   family: string,
-  options: { cacheDir?: string; force?: boolean; chars?: string } = {},
+  options: { cacheDir?: string; force?: boolean; chars?: string; weight?: number } = {},
 ): Promise<string[]> {
   const cacheDir = resolve(options.cacheDir ?? CACHE_DIR);
   const slug = slugify(family);
@@ -37,7 +50,8 @@ export async function downloadFont(
   // Build a cache key that includes the character set (if any) so different
   // character requests don't collide in the cache.
   const hashSuffix = options.chars ? `-${charsHash(options.chars)}` : '';
-  const cacheKey = `${slug}${hashSuffix}`;
+  const weightSuffix = options.weight === undefined ? '' : `-w${options.weight}`;
+  const cacheKey = `${slug}${weightSuffix}${hashSuffix}`;
   const manifestPath = join(cacheDir, `${cacheKey}.manifest.json`);
 
   // Check cache: if all previously-downloaded subset files still exist, reuse them
@@ -54,7 +68,7 @@ export async function downloadFont(
   }
 
   const encodedFamily = encodeURIComponent(family);
-  let cssUrl = `https://fonts.googleapis.com/css2?family=${encodedFamily}`;
+  let cssUrl = `https://fonts.googleapis.com/css2?family=${encodedFamily}${options.weight === undefined ? '' : `:wght@${options.weight}`}`;
 
   // The &text= parameter makes Google Fonts return only the subsets that cover
   // the requested characters. This is critical for CJK fonts which may have
@@ -71,7 +85,8 @@ export async function downloadFont(
   });
 
   if (!cssResponse.ok) {
-    throw new Error(`Failed to fetch font CSS for "${family}": ${cssResponse.status} ${cssResponse.statusText}`);
+    const which = options.weight === undefined ? `"${family}"` : `"${family}" at weight ${options.weight} (does the family have it?)`;
+    throw new Error(`Failed to fetch font CSS for ${which}: ${cssResponse.status} ${cssResponse.statusText}`);
   }
 
   const css = await cssResponse.text();

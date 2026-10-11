@@ -2,13 +2,14 @@ import type { TegakiBundle } from '../types.ts';
 import { toCssFeatureSettings } from './features.ts';
 
 /**
- * One registered face per font URL, with the `font-feature-settings` and
- * `unicode-range` it was made with: the same file under other settings (a
- * feature toggled off) is a different face.
+ * One registered face per font URL, with the `font-feature-settings`,
+ * `unicode-range` and weight it was made with: the same file under other
+ * settings (a feature toggled off) is a different face.
  */
 interface CachedFace {
   settings: string;
   unicodeRange: string | undefined;
+  weight: string;
   pending: Promise<void>;
   /** The loaded face, once registered. */
   face: FontFace | null;
@@ -22,7 +23,7 @@ const fontFaces = new Map<string, CachedFace>();
  * Resolves immediately if the font is already loaded.
  */
 export async function ensureFontFace(bundle: TegakiBundle): Promise<void> {
-  await ensureFont(bundle.family, bundle.fontUrl, bundle.features, bundle.extraFontUrls, bundle.extraFontRanges);
+  await ensureFont(bundle.family, bundle.fontUrl, bundle.features, bundle.extraFontUrls, bundle.extraFontRanges, bundle.weight);
 }
 
 export function ensureFont(
@@ -31,6 +32,7 @@ export function ensureFont(
   features?: readonly string[],
   extraFontUrls?: readonly string[],
   extraFontRanges?: readonly string[],
+  weight = 400,
 ): Promise<void> | null {
   if (typeof document === 'undefined') return Promise.resolve();
   // Register every subset URL under the same family name. Browsers union
@@ -51,8 +53,11 @@ export function ensureFont(
   // Legacy bundles without any declared features fall back to disabling
   // liga/calt so 1:1 char-to-glyph fallback holds.
   const featureSettings = toCssFeatureSettings(features ?? []);
+  // Each face is registered at its weight, so the browser picks the one the
+  // engine draws the strokes of (see `matchFontWeight`).
+  const fontWeight = String(weight);
   const same = (cached: CachedFace | undefined, unicodeRange: string | undefined) =>
-    cached?.settings === featureSettings && cached.unicodeRange === unicodeRange;
+    cached?.settings === featureSettings && cached.unicodeRange === unicodeRange && cached.weight === fontWeight;
   if (faces.every((f) => same(fontFaces.get(f.url), f.unicodeRange) && fontFaces.get(f.url)?.face)) return null;
   const pending = faces.map(({ url: u, unicodeRange }) => {
     const cached = fontFaces.get(u);
@@ -60,11 +65,12 @@ export function ensureFont(
     const entry: CachedFace = {
       settings: featureSettings,
       unicodeRange,
+      weight: fontWeight,
       pending: Promise.resolve(),
       face: null,
       replaces: cached ? (cached.face ?? cached.replaces) : null,
     };
-    entry.pending = new FontFace(family, `url(${u})`, { featureSettings, ...(unicodeRange ? { unicodeRange } : {}) })
+    entry.pending = new FontFace(family, `url(${u})`, { featureSettings, weight: fontWeight, ...(unicodeRange ? { unicodeRange } : {}) })
       .load()
       .then((loaded) => {
         // Swap in place once the new face is ready, so text never falls back

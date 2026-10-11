@@ -13,9 +13,12 @@ export function drawFallbackGlyph(
   fontFamily: string,
   color: string,
   direction: CanvasDirection = 'ltr',
+  // The face's weight, not the text's: a canvas makes up a bold the DOM
+  // doesn't (it has no font-synthesis), so it asks for the face it has.
+  fontWeight = 400,
 ) {
   ctx.save();
-  ctx.font = `${fontSize}px ${fontFamily}`;
+  ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
   ctx.textBaseline = 'alphabetic';
   // `x` is the text's left edge. The default 'start' alignment would take it
   // as the right edge on a canvas inheriting an RTL paragraph's direction.

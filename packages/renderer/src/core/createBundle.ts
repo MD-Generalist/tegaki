@@ -1,4 +1,4 @@
-import { BUNDLE_VERSION, type LineCap, type TegakiBundle, type TegakiGlyphData } from '../types.ts';
+import { BUNDLE_VERSION, type LineCap, type TegakiBundle, type TegakiFace, type TegakiGlyphData } from '../types.ts';
 
 /**
  * Creates a {@link TegakiBundle} from its constituent parts.
@@ -14,6 +14,9 @@ import { BUNDLE_VERSION, type LineCap, type TegakiBundle, type TegakiGlyphData }
  *   glyphData,
  * });
  * ```
+ *
+ * Other weights of the font go in `faces`, each with its own font file and
+ * glyph data; the renderer draws the one the text's `font-weight` picks.
  */
 export function createBundle({
   family,
@@ -25,6 +28,8 @@ export function createBundle({
   unitsPerEm = 1000,
   ascender = 800,
   descender = -200,
+  weight,
+  faces,
 }: {
   family: string;
   fullFamily?: string;
@@ -35,10 +40,16 @@ export function createBundle({
   unitsPerEm?: number;
   ascender?: number;
   descender?: number;
+  /** The weight of the face above (default 400). */
+  weight?: number;
+  /** The font's other weights. */
+  faces?: readonly TegakiFace[];
 }): TegakiBundle {
-  const rules = [`@font-face { font-family: '${family}'; src: url(${fontUrl}); }`];
-  if (fullFamily && fullFontUrl) {
-    rules.push(`@font-face { font-family: '${fullFamily}'; src: url(${fullFontUrl}); }`);
+  const rules: string[] = [];
+  for (const face of [{ weight, fontUrl, fullFontUrl }, ...(faces ?? [])]) {
+    const w = face.weight === undefined ? '' : ` font-weight: ${face.weight};`;
+    rules.push(`@font-face { font-family: '${family}'; src: url(${face.fontUrl});${w} }`);
+    if (fullFamily && face.fullFontUrl) rules.push(`@font-face { font-family: '${fullFamily}'; src: url(${face.fullFontUrl});${w} }`);
   }
   return {
     version: BUNDLE_VERSION,
@@ -52,5 +63,7 @@ export function createBundle({
     ascender,
     descender,
     glyphData,
+    ...(weight === undefined ? {} : { weight }),
+    ...(faces?.length ? { faces } : {}),
   };
 }

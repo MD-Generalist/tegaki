@@ -38,6 +38,7 @@ export {
   type TimelineEntry,
   type TimelineStaggerConfig,
 } from '../lib/timeline.ts';
+export { bundleForWeight, bundleWeights } from '../lib/weights.ts';
 export { type AnnotateMark, type AnnotateOptions, type AnnotateWhen, annotatePlugin } from '../plugins/annotate.ts';
 export { boilPlugin } from '../plugins/boil.ts';
 export { glowPlugin } from '../plugins/glow.ts';
@@ -45,7 +46,7 @@ export { globalGradientPlugin, strokeGradientPlugin } from '../plugins/gradient.
 export { type GroupableStroke, groupStrokes, type StrokeGroup, type StrokeGroupBy } from '../plugins/groups.ts';
 export { taperPlugin } from '../plugins/taper.ts';
 export { variationPlugin } from '../plugins/variation.ts';
-export { BUNDLE_VERSION, type LineCap, type TegakiBundle, type TegakiGlyphData } from '../types.ts';
+export { BUNDLE_VERSION, type LineCap, type TegakiBundle, type TegakiFace, type TegakiGlyphData } from '../types.ts';
 export { getBundle, registerBundle } from './bundle-registry.ts';
 export { createBundle } from './createBundle.ts';
 export {

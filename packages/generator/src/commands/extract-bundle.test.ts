@@ -3,7 +3,15 @@ import { readFileSync } from 'node:fs';
 import * as opentype from 'opentype.js';
 import { subsetFont } from '../font/subset.ts';
 import { DEFAULT_GEOMETRY_OPTIONS } from '../geometry/types.ts';
-import { DEFAULT_OPTIONS, extractTegakiBundle, generateArgsSchema, parseFont, pickGeometryOptions } from './generate.ts';
+import {
+  combineWeightBundles,
+  DEFAULT_OPTIONS,
+  extractTegakiBundle,
+  generateArgsSchema,
+  parseFont,
+  parseWeights,
+  pickGeometryOptions,
+} from './generate.ts';
 
 const fontPath = new URL('../../../renderer/fonts/caveat/caveat.ttf', import.meta.url);
 
@@ -92,6 +100,81 @@ describe('extractTegakiBundle with extra font subsets', () => {
     expect(byId[`1:${arabic.charToGlyphIndex('ل')}`]).toBeDefined();
     expect(byId[String(latin.charToGlyphIndex('('))]).toBeDefined();
     expect(byId[`1:${arabic.charToGlyphIndex('(')}`]).toBeUndefined();
+  });
+});
+
+describe('combineWeightBundles', () => {
+  // The same file stands in for both weights: only the layout of the files matters here.
+  const combined = (async () => {
+    const fontBuffer = readFileSync(fontPath).buffer as ArrayBuffer;
+    const { features } = await parseFont(fontBuffer);
+    const face = (fontFileName: string) =>
+      extractTegakiBundle({
+        fontBuffer,
+        fontFileName,
+        chars: 'a',
+        options: { ...DEFAULT_OPTIONS, disabledFeatures: features },
+        requestedFamily: 'Caveat',
+        fullFontBuffer: fontBuffer,
+        fullFontFileName: fontFileName === 'caveat-abc.ttf' ? 'caveat.ttf' : 'caveat-w700.ttf',
+      });
+    const files = combineWeightBundles([
+      { weight: 400, bundle: await face('caveat-abc.ttf') },
+      { weight: 700, bundle: await face('caveat-w700-abc.ttf') },
+    ]);
+    return { files, module: files.find((f) => f.path === 'bundle.ts')!.content as string };
+  })();
+
+  test("another weight's files are named after the own face's, suffixed by the weight", async () => {
+    const { files } = await combined;
+    expect(files.map((f) => f.path).sort()).toEqual(
+      ['bundle.ts', 'caveat-abc-700.ttf', 'caveat-abc.ttf', 'caveat-700.ttf', 'caveat.ttf', 'glyphData-700.json', 'glyphData.json'].sort(),
+    );
+  });
+
+  test('bundle.ts lists the other weight as a face, with its own files and strokes', async () => {
+    const { module } = await combined;
+    expect(module).toContain(`import fontUrl700 from './caveat-abc-700.ttf' with { type: 'url' };`);
+    expect(module).toContain(`import glyphData700 from './glyphData-700.json' with { type: 'json' };`);
+    expect(module).toContain('  weight: 400,');
+    expect(module).toContain('    { weight: 700, fontUrl: fontUrl700, fullFontUrl: fullFontUrl700, glyphData: glyphData700 },');
+  });
+
+  test('each face is registered at its weight', async () => {
+    const { module } = await combined;
+    expect(module).toContain(`src: url(\${fontUrl}); font-weight: 400; }`);
+    expect(module).toContain(`src: url(\${fontUrl700}); font-weight: 700; }`);
+    expect(module).toContain(`@font-face { font-family: 'Caveat'; src: url(\${fullFontUrl700}); font-weight: 700; }`);
+  });
+
+  test('a weight given twice is refused', async () => {
+    const fontBuffer = readFileSync(fontPath).buffer as ArrayBuffer;
+    const bundle = await extractTegakiBundle({
+      fontBuffer,
+      fontFileName: 'caveat.ttf',
+      chars: 'a',
+      options: DEFAULT_OPTIONS,
+      subset: false,
+    });
+    expect(() =>
+      combineWeightBundles([
+        { weight: 400, bundle },
+        { weight: 400, bundle },
+      ]),
+    ).toThrow('given twice');
+  });
+});
+
+describe('parseWeights', () => {
+  test('takes a comma list or the flag repeated', () => {
+    expect(parseWeights(['400,700'])).toEqual([400, 700]);
+    expect(parseWeights(['400', '700'])).toEqual([400, 700]);
+  });
+
+  test('refuses what is not a font weight', () => {
+    expect(() => parseWeights(['bold'])).toThrow();
+    expect(() => parseWeights(['1200'])).toThrow();
+    expect(() => parseWeights(['400,400'])).toThrow();
   });
 });
 

@@ -43,6 +43,7 @@ import { applyShaperPositions, computeLayoutBbox, computeTextLayout, lineWords, 
 import type { Timeline, TimelineConfig, TimelineEntry } from '../lib/timeline.ts';
 import { computeTimeline } from '../lib/timeline.ts';
 import { cssFontFamily, drawsFallbackGlyphs, graphemes, lookupGlyphData } from '../lib/utils.ts';
+import { bundleForWeight, parseFontWeight } from '../lib/weights.ts';
 import type { TegakiBundle, TegakiGlyphData } from '../types.ts';
 import { getBundle, registerBundle, resolveBundle } from './bundle-registry.ts';
 import { getPlugin, namesAny, onPluginRegistered, PluginResolver, registerPlugin } from './plugin-registry.ts';
@@ -62,7 +63,7 @@ import {
   timingWith,
 } from './plugins.ts';
 import { pressurePlugin, resolvePressure } from './pressure.ts';
-import { buildChildren, buildRootProps, canvasBoxStyle, domCreateElement } from './render-elements.ts';
+import { buildChildren, buildRootProps, canvasBoxStyle, domCreateElement, SENTINEL_TRANSITION } from './render-elements.ts';
 import { getShaperForBundle, registerShaper, settledShaperForBundle } from './shaper-registry.ts';
 import type {
   CreateElementFn,
@@ -299,7 +300,12 @@ export class TegakiEngine {
 
   // --- Options ---
   private _text = '';
+  /** The bundle as given (`font`), with every weight it has. */
+  private _bundle: TegakiBundle | null = null;
+  /** The face of `_bundle` the text's weight picks: what the engine draws, shapes and lays out with. */
   private _font: TegakiBundle | null = null;
+  /** The root's computed `font-weight`. */
+  private _fontWeight = 400;
   private _timeControl: TimeControlMode[keyof TimeControlMode] = { mode: 'uncontrolled' };
   private _pressure = 1;
   private _timing: TimelineConfig | undefined;
@@ -885,8 +891,9 @@ export class TegakiEngine {
 
     if ('font' in options) {
       const resolved = resolveBundle(options.font) ?? null;
-      if (resolved !== this._font) {
-        this._loadFont(resolved);
+      if (resolved !== this._bundle) {
+        this._bundle = resolved;
+        this._loadFont(resolved && bundleForWeight(resolved, this._fontWeight));
         dirtyTimeline = true;
         dirtyLayout = true;
         dirtyPlayback = true;
@@ -1082,7 +1089,27 @@ export class TegakiEngine {
     this._lineHeight = this._readLineHeight(styles, this._fontSize);
     this._currentColor = styles.color;
     this._letterSpacing = parseLetterSpacing(styles.letterSpacing);
+    this._fontWeight = parseFontWeight(styles.fontWeight);
     this._updateOverlayStyle();
+  }
+
+  /**
+   * Adopt the text's computed `font-weight`. A bundle with several weights
+   * draws the face CSS font matching picks for it (the one the browser lays
+   * the text out in), so a new face is loaded and the text shaped in it again.
+   * Returns whether the weight changed; the caller lays the text out again.
+   */
+  private _setFontWeight(next: number): boolean {
+    if (next === this._fontWeight) return false;
+    this._fontWeight = next;
+    const face = this._bundle && bundleForWeight(this._bundle, next);
+    if (face !== this._font) {
+      this._loadFont(face);
+      this._recomputeTimeline();
+      this._updateDom();
+      this._evaluatePlayback();
+    }
+    return true;
   }
 
   /** How the overlay's text is laid out, for the shaper to match. */
@@ -1157,9 +1184,7 @@ export class TegakiEngine {
 
   private _updateSentinelTransition(): void {
     const isCss = this._timeControl.mode === 'css';
-    this._sentinelEl.style.transition = isCss
-      ? `font-size 0.001s, line-height 0.001s, color 0.001s, letter-spacing 0.001s, ${CSS_PROGRESS} 0.001s`
-      : 'font-size 0.001s, line-height 0.001s, color 0.001s, letter-spacing 0.001s';
+    this._sentinelEl.style.transition = isCss ? `${SENTINEL_TRANSITION}, ${CSS_PROGRESS} 0.001s` : SENTINEL_TRANSITION;
   }
 
   // =========================================================================
@@ -1178,6 +1203,11 @@ export class TegakiEngine {
 
     let changed = false;
     let layoutChanged = false;
+
+    if (this._setFontWeight(parseFontWeight(styles.fontWeight))) {
+      layoutChanged = true;
+      changed = true;
+    }
 
     if (newWidth !== this._containerWidth) {
       this._containerWidth = newWidth;
@@ -1221,6 +1251,11 @@ export class TegakiEngine {
         this._recomputeLayout();
         changed = true;
       }
+    }
+
+    if (e.propertyName === 'font-weight' && this._setFontWeight(parseFontWeight(styles.fontWeight))) {
+      this._recomputeLayout();
+      changed = true;
     }
 
     if (e.propertyName === 'color') {
@@ -1295,7 +1330,7 @@ export class TegakiEngine {
       return;
     }
 
-    const pending = ensureFont(font.family, font.fontUrl, font.features, font.extraFontUrls, font.extraFontRanges);
+    const pending = ensureFont(font.family, font.fontUrl, font.features, font.extraFontUrls, font.extraFontRanges, font.weight);
     if (pending === null) {
       this._fontReady = true;
     } else {
@@ -1486,7 +1521,7 @@ export class TegakiEngine {
     const font = this._font;
     if (!font?.fullFamily || !font.fullFontUrl || !drawsFallbackGlyphs(this._timeline.entries)) return;
     const face = { family: font.fullFamily, url: font.fullFontUrl };
-    const pending = ensureFont(face.family, face.url, font.features);
+    const pending = ensureFont(face.family, face.url, font.features, undefined, undefined, font.weight);
     if (pending === null) return;
     pending.then(
       () => {
@@ -1510,7 +1545,7 @@ export class TegakiEngine {
     if (this._lineHeightNormal) this._lineHeight = this._measureNormalLineHeight(this._fontSize);
     if (this._fontReady && this._font?.family && this._fontSize && this._containerWidth && this._text) {
       const shaperId = this._shaper ? '1' : '0';
-      const key = `${this._text}\0${this._font.family}\0${this._fallbackFont ?? ''}\0${this._fontSize}\0${this._lineHeight}\0${this._containerWidth}\0${this._direction ?? ''}\0${shaperId}\0${this._letterSpacing}`;
+      const key = `${this._text}\0${this._font.family}\0${this._fallbackFont ?? ''}\0${this._fontSize}\0${this._lineHeight}\0${this._containerWidth}\0${this._direction ?? ''}\0${shaperId}\0${this._letterSpacing}\0${this._fontWeight}`;
       if (key === this._layoutKey) return;
       this._layoutKey = key;
       let layout = computeTextLayout(this._overlayEl, this._fontSize);
@@ -2367,6 +2402,7 @@ export class TegakiEngine {
           cssFontFamily(font, this._fallbackFont),
           color,
           clip?.direction ?? layout.direction ?? 'ltr',
+          font.weight,
         );
         if (clip) ctx.restore();
         inkBoxes.push(textBox);
@@ -2438,7 +2474,7 @@ export class TegakiEngine {
             maskCtx.restore();
           }
         }
-        maskCtx.font = `${fontSize}px ${cssFontFamily(font, this._fallbackFont)}`;
+        maskCtx.font = `${font.weight ?? 400} ${fontSize}px ${cssFontFamily(font, this._fallbackFont)}`;
         maskCtx.textBaseline = 'alphabetic';
         // Draw each word where the DOM put it, as a single string so the
         // browser's shaper sees the whole word — per-character fillText would
