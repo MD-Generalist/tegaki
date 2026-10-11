@@ -14,7 +14,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import * as opentype from 'opentype.js';
+import * as opentypeModule from 'opentype.js';
 
 /**
  * The characters the home page writes in each font it cuts down, by family.
@@ -36,6 +36,12 @@ export const HOME_FONT_PREFIX = 'tegaki-home-font:';
 
 /** A family's bundle directory under packages/renderer/fonts. */
 export const fontDir = (family: string) => family.toLowerCase().replace(/\s+/g, '-');
+
+// opentype.js has no `exports` map, so Node (which runs this plugin under
+// Vite) loads its CommonJS build, whose names are only on `default`; Bun and
+// bundlers take its ES module, which exports them by name.
+const opentype: typeof opentypeModule =
+  'parse' in opentypeModule ? opentypeModule : (opentypeModule as unknown as { default: typeof opentypeModule }).default;
 
 const here = dirname(fileURLToPath(import.meta.url));
 const FONTS_DIR = join(here, '../../renderer/fonts');
