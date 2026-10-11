@@ -13,7 +13,7 @@ import {
   type SkeletonMethod,
 } from 'tegaki-generator';
 import { type Pipeline, SKELETON_METHODS } from '../../preview/constants.ts';
-import { URL_DEFAULTS, type UrlState } from '../../url-state.ts';
+import { bundleWeightsOf, URL_DEFAULTS, type UrlState } from '../../url-state.ts';
 import type { CharsetInfo } from '../charsets.ts';
 import type { SetSetting } from '../state.ts';
 import { Chip, Hint, Section, Segmented } from '../ui.tsx';
@@ -47,6 +47,20 @@ const resetKeys = (opts: PipelineOptions, keys: readonly (keyof PipelineOptions)
   ...Object.fromEntries(keys.map((k) => [k, DEFAULT_OPTIONS[k]])),
 });
 
+/** The usual names of the CSS weights, for the Weights chips. */
+const WEIGHT_NAMES: Record<number, string> = {
+  100: 'Thin',
+  200: 'ExtraLight',
+  300: 'Light',
+  400: 'Regular',
+  500: 'Medium',
+  600: 'SemiBold',
+  700: 'Bold',
+  800: 'ExtraBold',
+  900: 'Black',
+};
+const weightLabel = (w: number) => (WEIGHT_NAMES[w] ? `${w} ${WEIGHT_NAMES[w]}` : String(w));
+
 const PIPELINE_HINTS: Record<Pipeline, string> = {
   geometry: 'Outline geometry → ink graph, ordered by the stroke-order references (see References). The shipped bundles use it.',
   raster: 'Rasterize → skeletonize → trace. The original pipeline, kept for comparison.',
@@ -56,12 +70,15 @@ export function PipelinePanel({
   settings,
   set,
   fontInfo,
+  fontWeights,
   charsets,
   onPipelineChange,
 }: {
   settings: UrlState;
   set: SetSetting;
   fontInfo: ParsedFontInfo | null;
+  /** Every weight the loaded font's family comes in; null for a font that is only its file. */
+  fontWeights: number[] | null;
   charsets: CharsetInfo | null;
   onPipelineChange: (p: Pipeline) => void;
 }) {
@@ -560,6 +577,10 @@ export function PipelinePanel({
         </Hint>
       </Section>
 
+      {fontInfo && !fontInfo.stroke && (
+        <WeightsSection settings={settings} set={set} family={fontInfo.family} drawn={fontInfo.weight ?? 400} available={fontWeights} />
+      )}
+
       <Section
         title="OpenType features"
         defaultOpen={features.length > 0}
@@ -601,5 +622,89 @@ export function PipelinePanel({
         )}
       </Section>
     </>
+  );
+}
+
+/**
+ * The weights of a Google font: the one the Studio draws and inspects, and
+ * the ones Download bundle writes — each traced on its own, one bundle that
+ * draws the weight the text's `font-weight` picks.
+ */
+function WeightsSection({
+  settings,
+  set,
+  family,
+  drawn,
+  available,
+}: {
+  settings: UrlState;
+  set: SetSetting;
+  family: string;
+  drawn: number;
+  available: number[] | null;
+}) {
+  const inBundle = bundleWeightsOf(settings);
+  const modified = settings.fontWeight !== URL_DEFAULTS.fontWeight || inBundle.length > 1;
+  if (!available || available.length < 2) {
+    return (
+      <Section title="Weights" defaultOpen={false}>
+        <Hint>
+          {available ? `${family} comes in one weight (${weightLabel(drawn)}).` : `This font is one file, of weight ${weightLabel(drawn)}.`}{' '}
+          A bundle of several weights takes a Google font with more.
+        </Hint>
+      </Section>
+    );
+  }
+  const toggle = (w: number) =>
+    set('bundleWeights', inBundle.includes(w) ? inBundle.filter((x) => x !== w) : [...inBundle, w].sort((a, b) => a - b));
+  return (
+    <Section
+      title="Weights"
+      modified={modified}
+      onReset={() => {
+        set('bundleWeights', []);
+        set('fontWeight', URL_DEFAULTS.fontWeight);
+      }}
+    >
+      <DialScope className="flex flex-col gap-1.5">
+        <SelectControl
+          label="Draw in"
+          value={String(settings.fontWeight)}
+          options={available.map((w) => ({ value: String(w), label: weightLabel(w) }))}
+          onChange={(v) => {
+            const w = Number(v);
+            // The weight drawn stays in the bundle with the others.
+            if (inBundle.length > 1)
+              set(
+                'bundleWeights',
+                [...new Set([...inBundle, w])].sort((a, b) => a - b),
+              );
+            set('fontWeight', w);
+          }}
+        />
+      </DialScope>
+      <div className="flex flex-wrap gap-1">
+        {available.map((w) => (
+          <Chip
+            key={w}
+            selected={inBundle.includes(w)}
+            onClick={() => w !== settings.fontWeight && toggle(w)}
+            title={
+              w === settings.fontWeight
+                ? 'The weight drawn is always in the bundle'
+                : `${inBundle.includes(w) ? 'Leave out' : 'Add'} ${weightLabel(w)}`
+            }
+          >
+            {weightLabel(w)}
+          </Chip>
+        ))}
+      </div>
+      <Hint>
+        {inBundle.length > 1
+          ? `Download bundle traces each of the ${inBundle.length} weights and writes them as one bundle: the renderer draws the one the text's font-weight picks. `
+          : "Pick more weights to put them in the downloaded bundle; the renderer draws the one the text's font-weight picks. "}
+        The text and glyphs here are drawn in {weightLabel(drawn)}.
+      </Hint>
+    </Section>
   );
 }

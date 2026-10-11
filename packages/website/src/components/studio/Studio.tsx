@@ -1,10 +1,18 @@
 import { zipSync } from 'fflate';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { TegakiRendererHandle } from 'tegaki';
-import { CHARSET_PRESETS, enumerateFontChars, extractTegakiBundle, type PipelineResult, strokeFontBundle } from 'tegaki-generator';
+import { matchFontWeight, type TegakiRendererHandle } from 'tegaki';
+import {
+  CHARSET_PRESETS,
+  combineWeightBundles,
+  enumerateFontChars,
+  extractTegakiBundle,
+  type PipelineResult,
+  strokeFontBundle,
+} from 'tegaki-generator';
 import { DEFAULT_EXAMPLE_FONT_TEXT, EXAMPLE_FONT_TEXTS, type Pipeline } from '../preview/constants.ts';
+import { fetchFontFromCDN } from '../preview/font-cdn.ts';
 import { strokeOrderProviders } from '../preview/stroke-order-providers.ts';
-import { defaultClipText } from '../url-state.ts';
+import { bundleWeightsOf, defaultClipText } from '../url-state.ts';
 import { AgentPromptMenu } from './AgentPromptMenu.tsx';
 import { type CharsetInfo, charsetCoverage, fontHasChar, recommendCharset } from './charsets.ts';
 import { ExportMenu } from './ExportMenu.tsx';
@@ -51,6 +59,14 @@ export function Studio() {
   const { font, loading, error, loadFamily, loadFile, restroke } = useFontLoader((loaded) => {
     resultsCache.current.clear();
     set('fontFamily', loaded.info.family);
+    // The weight drawn is the one the font came in (a family without the one
+    // asked for gives the nearest), and the bundle keeps only weights it has.
+    const weight = loaded.info.weight ?? 400;
+    const available = loaded.weights ?? [weight];
+    setSettings((s) => {
+      const bundleWeights = s.bundleWeights.filter((w) => available.includes(w));
+      return s.fontWeight === weight && bundleWeights.length === s.bundleWeights.length ? s : { ...s, fontWeight: weight, bundleWeights };
+    });
     // "All in font" follows the font: expand it to the new font's glyphs.
     setSettings((s) => (s.allChars ? { ...s, chars: enumerateFontChars(loaded.info.font, loaded.info.extraFonts) } : s));
     if (adoptRecommendedCharset.current) {
@@ -88,11 +104,18 @@ export function Studio() {
     return () => clearTimeout(id);
   }, [font, strokeOptions, restroke]);
 
-  // Load the URL's font once on mount.
+  // Load the URL's font once on mount, at the URL's weight.
   const initialFamily = useRef(settings.fontFamily);
+  const initialWeight = useRef(settings.fontWeight);
   useEffect(() => {
-    loadFamily(initialFamily.current, strokeOptionsRef.current);
+    loadFamily(initialFamily.current, strokeOptionsRef.current, initialWeight.current);
   }, [loadFamily]);
+
+  // Another weight drawn is another file of a Google font's family.
+  useEffect(() => {
+    if (!font?.weights || loading || settings.fontWeight === (font.info.weight ?? 400)) return;
+    loadFamily(font.info.family, strokeOptionsRef.current, settings.fontWeight);
+  }, [font, loading, settings.fontWeight, loadFamily]);
 
   // Switching pipelines carries Clip to text over to the new pipeline's default,
   // unless it was changed by hand.
@@ -117,23 +140,45 @@ export function Studio() {
     try {
       const slug = font.info.family.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-');
       const stroke = font.info.stroke;
-      // A stroke font's strokes go in as they are, beside the font made from them.
-      const bundle = stroke
-        ? strokeFontBundle(stroke.font, stroke.options, settings.chars)
-        : await extractTegakiBundle({
-            fontBuffer: font.buffer,
-            fontFileName: `${slug}.ttf`,
-            chars: settings.chars,
-            options: settings.options,
-            extraFontBuffers: font.extraBuffers,
-            subset: false,
-            pipeline: settings.pipeline,
-            geometryOptions: settings.geometryOptions,
-            strokeOrderProviders: strokeOrderProviders(settings.geometryOptions),
-          });
+      const drawnWeight = font.info.weight ?? 400;
+      const extractAt = async (weight: number) => {
+        // The drawn weight is loaded; the others are fetched as it was.
+        const source =
+          weight === drawnWeight
+            ? { buffer: font.buffer, extra: font.extraBuffers }
+            : await fetchFontFromCDN(font.info.family, weight).then((f) => ({
+                buffer: f.primary,
+                extra: f.extra.length > 0 ? f.extra : undefined,
+              }));
+        return extractTegakiBundle({
+          fontBuffer: source.buffer,
+          fontFileName: `${slug}.ttf`,
+          chars: settings.chars,
+          options: settings.options,
+          extraFontBuffers: source.extra,
+          requestedFamily: font.info.family,
+          subset: false,
+          pipeline: settings.pipeline,
+          geometryOptions: settings.geometryOptions,
+          strokeOrderProviders: strokeOrderProviders(settings.geometryOptions),
+        });
+      };
+      // Several weights make one bundle, its own face the one normal text picks.
+      const weights = font.weights ? bundleWeightsOf(settings).filter((w) => font.weights!.includes(w)) : [];
+      const own = matchFontWeight(weights, 400);
+      const files = stroke
+        ? // A stroke font's strokes go in as they are, beside the font made from them.
+          strokeFontBundle(stroke.font, stroke.options, settings.chars).files
+        : weights.length > 1
+          ? combineWeightBundles(
+              await Promise.all(
+                [own, ...weights.filter((w) => w !== own)].map(async (weight) => ({ weight, bundle: await extractAt(weight) })),
+              ),
+            )
+          : (await extractAt(drawnWeight)).files;
       const encoder = new TextEncoder();
       const zipFiles: Record<string, Uint8Array> = {};
-      for (const file of bundle.files) {
+      for (const file of files) {
         const content = typeof file.content === 'string' ? encoder.encode(file.content) : file.content;
         zipFiles[`${slug}/${file.path}`] = content instanceof Uint8Array ? content : new Uint8Array(content);
       }
@@ -147,7 +192,7 @@ export function Studio() {
     } finally {
       setBundleBusy(false);
     }
-  }, [font, settings.chars, settings.options, settings.pipeline, settings.geometryOptions]);
+  }, [font, settings]);
 
   // The variable font of the text's glyphs (prototype). It's built by its preview, from a bundle with
   // every form the browser can shape the text to, so a download opens the preview and waits for it.
@@ -198,11 +243,14 @@ export function Studio() {
               error={error}
               onPickFamily={(family, featured) => {
                 adoptRecommendedCharset.current = true;
-                loadFamily(family, strokeOptions);
+                // Another family starts at its regular weight, alone in the bundle.
+                set('bundleWeights', []);
+                loadFamily(family, strokeOptions, 400);
                 if (featured) set('previewText', EXAMPLE_FONT_TEXTS[family] ?? DEFAULT_EXAMPLE_FONT_TEXT);
               }}
               onPickFile={(file) => {
                 adoptRecommendedCharset.current = true;
+                set('bundleWeights', []);
                 loadFile(file, strokeOptions);
               }}
             />
@@ -255,6 +303,7 @@ export function Studio() {
               onDownloadBundle={downloadBundle}
               bundleBusy={bundleBusy}
               chars={settings.chars}
+              weights={font?.weights ? bundleWeightsOf(settings) : null}
               pipeline={settings.pipeline}
               speed={settings.animSpeed}
               onDownloadProgressFont={mode === 'text' ? downloadProgressFont : null}
@@ -307,6 +356,7 @@ export function Studio() {
               settings={settings}
               set={set}
               fontInfo={font?.info ?? null}
+              fontWeights={font?.weights ?? null}
               charsets={charsets}
               onPipelineChange={switchPipeline}
               onClose={isDesktop ? undefined : () => setInspectorOpen(false)}

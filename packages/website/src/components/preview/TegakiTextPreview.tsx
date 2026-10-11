@@ -482,6 +482,9 @@ export const TegakiTextPreview = forwardRef<TegakiRendererHandle, TegakiTextPrev
       ascender: fontInfo.ascender,
       descender: fontInfo.descender,
       glyphData,
+      // Each weight of a family is registered at its weight under the family's
+      // name, so a newer weight never draws the text layer in an older one.
+      weight: fontInfo.weight ?? 400,
       ...(extraFontUrls.length > 0 ? { extraFontUrls, extraFontRanges } : {}),
       ...(hasVariants ? { glyphDataById: variants } : {}),
       ...(enabledFeatures.length > 0 ? { features: enabledFeatures } : {}),
@@ -566,7 +569,15 @@ export const TegakiTextPreview = forwardRef<TegakiRendererHandle, TegakiTextPrev
     <TegakiRenderer
       ref={ref}
       className={className}
-      style={{ fontSize: `${fontSizePx}px`, lineHeight: lineHeightRatio ?? 'normal', letterSpacing: `${letterSpacingPx}px`, ...style }}
+      style={{
+        fontSize: `${fontSizePx}px`,
+        lineHeight: lineHeightRatio ?? 'normal',
+        letterSpacing: `${letterSpacingPx}px`,
+        // The bundle drawn states its font's weight; the text asks for it, so
+        // the browser picks that font's face of the family, as the engine does.
+        fontWeight: shown.bundle.weight ?? 400,
+        ...style,
+      }}
       text={shown.text}
       time={time}
       font={shown.bundle}

@@ -38,7 +38,7 @@ export {
   type TimelineEntry,
   type TimelineStaggerConfig,
 } from '../lib/timeline.ts';
-export { bundleForWeight, bundleWeights } from '../lib/weights.ts';
+export { bundleForWeight, bundleWeights, matchFontWeight } from '../lib/weights.ts';
 export { type AnnotateMark, type AnnotateOptions, type AnnotateWhen, annotatePlugin } from '../plugins/annotate.ts';
 export { boilPlugin } from '../plugins/boil.ts';
 export { glowPlugin } from '../plugins/glow.ts';

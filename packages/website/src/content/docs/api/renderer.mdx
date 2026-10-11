@@ -27,6 +27,16 @@ import { TegakiEngine } from 'tegaki/core';      // Vanilla JS
 
 The font bundle containing glyph components, metrics, and timing data.
 
+A bundle can hold several weights of its font (`faces`, made by the [studio](/guides/generating/#font-weights) or `generate --weights`). The renderer then draws the weight the text's CSS `font-weight` picks, by the same font matching the browser uses, so the strokes and the laid-out text always come from the same face. The weight can be set on the renderer or on any element above it, and when it changes later through a class or a media query, the renderer switches faces. A face's font loads only once a weight picks it:
+
+```tsx
+<TegakiRenderer font={caveat} style={{ fontWeight: 700 }}>
+  Bold strokes
+</TegakiRenderer>
+```
+
+The browser never fakes a bold from a lighter face (`font-synthesis-weight: none` on the renderer), because the strokes would not follow it. A bundle with one weight draws that weight whatever `font-weight` asks for.
+
 ### `children` / `text`
 
 **Type:** `string`
@@ -728,6 +738,19 @@ The text as an animated SVG string, with no DOM: what the [command line](/guides
 import { glowPlugin, textToSvg } from 'tegaki/core';
 
 const svg = textToSvg('Hello', bundle, { mode: 'once', plugins: [glowPlugin({ radius: 0.12, color: '#f0a' })] });
+```
+
+`fontWeight` picks a weight of a bundle with several. A `shaper` passed with it must be built from that weight's face, `bundleForWeight(bundle, fontWeight)`.
+
+### `bundleForWeight(bundle, weight)` / `bundleWeights(bundle)` / `matchFontWeight(weights, weight)`
+
+`bundleWeights` lists the weights a bundle has a face for, its own first. `matchFontWeight` is CSS font matching for weights: the one of `weights` a text of `weight` is drawn in. `bundleForWeight` returns the bundle as that weight draws it, with the face's files and glyph data in place of the bundle's own. It returns the same object every time for the same face, and the bundle itself when the match is the bundle's own face.
+
+```ts
+import { bundleForWeight, bundleWeights } from 'tegaki/core';
+
+bundleWeights(caveat); // [400, 700]
+const bold = bundleForWeight(caveat, 600); // the 700 face: CSS picks a heavier face first above 500
 ```
 
 ### `drawGlyph(ctx, glyph, pos, localTime, options?)`

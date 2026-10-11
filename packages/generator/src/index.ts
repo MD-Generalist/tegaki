@@ -19,6 +19,7 @@ export {
 } from './commands/coverage-report.ts';
 export {
   type BundleFile,
+  combineWeightBundles,
   DEFAULT_OPTIONS,
   type ExtractBundleInput,
   extractTegakiBundle,

@@ -122,6 +122,23 @@ test('names the inspected form of the glyph', () => {
   expect(prompt).toContain('its form `a.ss01`');
 });
 
+describe('font weights', () => {
+  test('a bundle of several weights asks the CLI for them, the one normal text picks first', () => {
+    const prompt = buildAgentPrompt(input({}, { fontWeight: 700, bundleWeights: [300, 400, 700] }));
+    expect(prompt).toContain('--weights 400,300,700');
+    expect(prompt).toContain('the bundle holds 300, 400, 700');
+  });
+
+  test('the regular weight alone adds no flag', () => {
+    expect(buildAgentPrompt(input())).not.toContain('--weights');
+  });
+
+  test('an uploaded font is its one file, with no --weights', () => {
+    const prompt = buildAgentPrompt(input({ font: { ...input().font!, fileName: 'Bold.ttf' } }, { fontWeight: 700 }));
+    expect(prompt).not.toContain('--weights');
+  });
+});
+
 describe('all-in-font charset', () => {
   test('"All in font" asks the CLI for every glyph', () => {
     const prompt = buildAgentPrompt(input({ charset: { preset: null, allInFont: true, count: 2000, mapped: 2000, recommended: null } }));

@@ -49,11 +49,11 @@ export function StandaloneTextPreview() {
     let cancelled = false;
     (async () => {
       try {
-        const { info, buffer, extraBuffers } = await loadFontFamily(state.fontFamily, {
-          penWidth: state.penWidth,
-          drawingSpeed: state.options.drawingSpeed,
-          strokePause: state.options.strokePause,
-        });
+        const { info, buffer, extraBuffers } = await loadFontFamily(
+          state.fontFamily,
+          { penWidth: state.penWidth, drawingSpeed: state.options.drawingSpeed, strokePause: state.options.strokePause },
+          state.fontWeight,
+        );
         if (cancelled) return;
         setFontInfo(info);
         setFontBuffer(buffer);

@@ -31,6 +31,8 @@ export interface LoadedFont {
   extraBuffers: ArrayBuffer[] | undefined;
   /** Set when the font was uploaded rather than fetched from Google Fonts. */
   fileName?: string;
+  /** Every weight a Google font's family comes in; absent for an uploaded file or a stroke font, only the one weight. */
+  weights?: number[];
 }
 
 /**
@@ -64,9 +66,10 @@ export function useFontLoader(onLoaded: (font: LoadedFont) => void) {
     }
   }, []);
 
-  // A Google font, or a stroke font drawn as `strokeOptions` say (see stroke-fonts.ts).
+  // A Google font at a weight, or a stroke font drawn as `strokeOptions` say (see stroke-fonts.ts).
   const loadFamily = useCallback(
-    (family: string, strokeOptions: Partial<StrokeFontOptions>) => run(() => loadFontFamily(family, strokeOptions)),
+    (family: string, strokeOptions: Partial<StrokeFontOptions>, weight?: number) =>
+      run(() => loadFontFamily(family, strokeOptions, weight)),
     [run],
   );
 

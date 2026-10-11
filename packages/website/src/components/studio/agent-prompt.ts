@@ -1,7 +1,8 @@
+import { matchFontWeight } from 'tegaki/core';
 import { DEFAULT_GEOMETRY_OPTIONS, DEFAULT_OPTIONS, type GeometryOptions, type PipelineOptions } from 'tegaki-generator';
 import { BUNDLED_FONTS } from '../../site.ts';
 import { SHOWCASE_PLUGINS } from '../plugins/index.ts';
-import { buildUrlParams, URL_DEFAULTS, type UrlState } from '../url-state.ts';
+import { buildUrlParams, bundleWeightsOf, URL_DEFAULTS, type UrlState } from '../url-state.ts';
 
 export type AgentGoal = 'generate' | 'optimize' | 'fix' | 'plugin';
 
@@ -136,6 +137,14 @@ export function buildAgentPrompt(input: AgentPromptInput): string {
         ? `- ${family}: a local file (\`${font.fileName}\`), not from Google Fonts`
         : `- ${family} (Google Fonts)`,
   );
+  const weights = bundleWeightsOf(settings);
+  if (!stroke && (weights.length > 1 || settings.fontWeight !== URL_DEFAULTS.fontWeight)) {
+    out.push(
+      weights.length > 1
+        ? `- Weights: the studio draws ${settings.fontWeight}; the bundle holds ${weights.join(', ')}, each traced on its own, and the renderer draws the one the text's \`font-weight\` picks`
+        : `- Weight: ${settings.fontWeight}`,
+    );
+  }
   if (font) {
     out.push(`- ${font.style} · ${font.unitsPerEm} units per em · ${font.lineCap} line caps`);
     out.push(`- OpenType features: ${font.features.length ? font.features.join(', ') : 'none'}`);
@@ -199,10 +208,16 @@ export function buildAgentPrompt(input: AgentPromptInput): string {
         ? ` -c "${settings.chars.replaceAll('"', '\\"')}"`
         : ' -c "<chars>"';
   const source = font?.fileName ? ` --font-file ${font.fileName}` : '';
+  // The first weight is the bundle's own face: the one normal text picks.
+  const own = matchFontWeight(weights, 400);
+  const weightsFlag =
+    !font?.fileName && (weights.length > 1 || settings.fontWeight !== URL_DEFAULTS.fontWeight)
+      ? ` --weights ${[own, ...weights.filter((w) => w !== own)].join(',')}`
+      : '';
   const pen = settings.penWidth !== URL_DEFAULTS.penWidth ? ` --pen-width ${settings.penWidth}` : '';
   const cmd = stroke
     ? `bun start generate --stroke-font ${font?.fileName ?? '<font.svg>'}${chars}${pen} -o <output-dir>`
-    : `bun start generate "${family}"${source}${chars} -p ${settings.pipeline}${flags.length ? ` ${flags.join(' ')}` : ''} -o <output-dir>`;
+    : `bun start generate "${family}"${source}${chars}${weightsFlag} -p ${settings.pipeline}${flags.length ? ` ${flags.join(' ')}` : ''} -o <output-dir>`;
   out.push(
     `- To build the bundle, use Export → Download bundle in the studio, or clone the repo and run \`${cmd}\`. Every studio pipeline setting is a CLI flag.${
       charset.preset && charset.preset !== 'Latin'

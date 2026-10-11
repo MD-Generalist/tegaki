@@ -96,6 +96,13 @@ export interface UrlState {
   frameWidth: number | null;
   /** A stroke font's pen width, as a fraction of the em (`pen`). */
   penWidth: number;
+  /** The weight of the font the Studio loads, draws and inspects (`fw`); a family without it gives the nearest. */
+  fontWeight: number;
+  /**
+   * The weights Download bundle writes (`bw`), the drawn one among them — see
+   * {@link bundleWeightsOf}. Empty = the drawn weight alone.
+   */
+  bundleWeights: number[];
   /** The character set is every glyph the font maps (`cs=all`) — expanded into `chars` once the font loads. */
   allChars: boolean;
   showOverlay: boolean;
@@ -160,6 +167,8 @@ export const URL_DEFAULTS: UrlState = {
   letterSpacingPx: 0,
   frameWidth: null,
   penWidth: DEFAULT_STROKE_FONT_OPTIONS.penWidth,
+  fontWeight: 400,
+  bundleWeights: [],
   allChars: false,
   showOverlay: false,
   timeMode: 'controlled',
@@ -337,6 +346,13 @@ function parseEnum<T extends string>(raw: string, allowed: readonly T[], fallbac
   return (allowed as readonly string[]).includes(raw) ? (raw as T) : fallback;
 }
 
+const isFontWeight = (w: number) => Number.isInteger(w) && w >= 1 && w <= 1000;
+
+/** The weights Download bundle writes: `bundleWeights` with the drawn weight, in order. */
+export function bundleWeightsOf(state: Pick<UrlState, 'fontWeight' | 'bundleWeights'>): number[] {
+  return [...new Set([...state.bundleWeights, state.fontWeight])].sort((a, b) => a - b);
+}
+
 /** Read URL state from the given search params (defaults to the current location). Returns only overrides (merged with defaults). */
 export function parseUrlState(search: string | URLSearchParams = window.location.search): UrlState {
   const p = new URLSearchParams(search);
@@ -371,6 +387,11 @@ export function parseUrlState(search: string | URLSearchParams = window.location
     const pw = Number(p.get('pen'));
     if (Number.isFinite(pw) && pw > 0 && pw < 1) state.penWidth = pw;
   }
+  if (p.has('fw')) {
+    const fw = Number(p.get('fw'));
+    if (isFontWeight(fw)) state.fontWeight = fw;
+  }
+  if (p.has('bw')) state.bundleWeights = [...new Set(p.get('bw')!.split(',').map(Number).filter(isFontWeight))].sort((a, b) => a - b);
   if (p.has('w')) {
     const w = Number(p.get('w'));
     state.frameWidth = Number.isFinite(w) && w > 0 ? Math.round(w) : null;
@@ -505,6 +526,9 @@ export function buildUrlParams(state: UrlState): URLSearchParams {
   if (state.letterSpacingPx !== URL_DEFAULTS.letterSpacingPx) p.set('ls', String(state.letterSpacingPx));
   if (state.frameWidth !== null) p.set('w', String(state.frameWidth));
   if (state.penWidth !== URL_DEFAULTS.penWidth) p.set('pen', String(state.penWidth));
+  if (state.fontWeight !== URL_DEFAULTS.fontWeight) p.set('fw', String(state.fontWeight));
+  const bundleWeights = bundleWeightsOf(state);
+  if (bundleWeights.length > 1) p.set('bw', bundleWeights.join(','));
   if (state.showOverlay !== URL_DEFAULTS.showOverlay) p.set('ol', '1');
   if (state.timeMode !== URL_DEFAULTS.timeMode) p.set('tm', state.timeMode);
   if (state.currentTime !== URL_DEFAULTS.currentTime) p.set('ct', String(state.currentTime));

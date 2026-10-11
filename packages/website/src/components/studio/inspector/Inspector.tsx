@@ -30,6 +30,7 @@ export function Inspector({
   settings,
   set,
   fontInfo,
+  fontWeights,
   charsets,
   onPipelineChange,
   onClose,
@@ -39,6 +40,8 @@ export function Inspector({
   settings: UrlState;
   set: SetSetting;
   fontInfo: ParsedFontInfo | null;
+  /** Every weight the loaded font's family comes in; null for a font that is only its file. */
+  fontWeights: number[] | null;
   charsets: CharsetInfo | null;
   onPipelineChange: (p: Pipeline) => void;
   onClose?: () => void;
@@ -84,7 +87,14 @@ export function Inspector({
         {tab === 'motion' && <MotionPanel settings={settings} set={set} />}
         {tab === 'plugins' && <PluginsPanel settings={settings} set={set} />}
         {tab === 'pipeline' && (
-          <PipelinePanel settings={settings} set={set} fontInfo={fontInfo} charsets={charsets} onPipelineChange={onPipelineChange} />
+          <PipelinePanel
+            settings={settings}
+            set={set}
+            fontInfo={fontInfo}
+            fontWeights={fontWeights}
+            charsets={charsets}
+            onPipelineChange={onPipelineChange}
+          />
         )}
       </div>
     </aside>

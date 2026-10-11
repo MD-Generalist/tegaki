@@ -30,6 +30,7 @@ export function ExportMenu({
   onDownloadBundle,
   bundleBusy,
   chars,
+  weights,
   pipeline,
   speed,
   onDownloadProgressFont,
@@ -44,6 +45,8 @@ export function ExportMenu({
   onDownloadBundle: () => void;
   bundleBusy: boolean;
   chars: string;
+  /** The weights the bundle holds, when the font comes in more than one. */
+  weights: number[] | null;
   pipeline: string;
   /** Motion › Speed — the animated formats play at it. */
   speed: number;
@@ -151,7 +154,7 @@ export function ExportMenu({
         <div className="flex items-baseline justify-between">
           <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">Font bundle</span>
           <span className="text-[11px] text-zinc-400">
-            {charCount} chars · {pipeline}
+            {charCount} chars{weights && weights.length > 1 ? ` · weights ${weights.join(', ')}` : ''} · {pipeline}
           </span>
         </div>
         <Hint>Stroke data + font as a .zip. Import its bundle.ts into any Tegaki renderer.</Hint>

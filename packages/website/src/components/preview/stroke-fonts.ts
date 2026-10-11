@@ -124,6 +124,8 @@ export interface LoadedFontSource {
   info: ParsedFontInfo;
   buffer: ArrayBuffer;
   extraBuffers: ArrayBuffer[] | undefined;
+  /** Every weight the family comes in (a Google font's); absent for a font that is only the one file. */
+  weights?: number[];
 }
 
 /** A stroke font as a loaded font: its synthesized font parsed, drawn as `options` say. */
@@ -134,13 +136,19 @@ export async function loadStrokeFont(font: StrokeFont, options: Partial<StrokeFo
 
 /**
  * The font a family names: a stroke font (STROKE_FONTS or `Drawn: <name>`),
- * drawn as `strokeOptions` say, or else a Google font from the Fontsource CDN.
+ * drawn as `strokeOptions` say, or else a Google font from the Fontsource CDN
+ * at `weight` (or the weight CSS would pick instead, when it hasn't that one).
  */
-export async function loadFontFamily(family: string, strokeOptions: Partial<StrokeFontOptions>): Promise<LoadedFontSource> {
+export async function loadFontFamily(
+  family: string,
+  strokeOptions: Partial<StrokeFontOptions>,
+  weight?: number,
+): Promise<LoadedFontSource> {
   const stroke = await strokeFontFor(family);
   if (stroke) return loadStrokeFont(stroke, strokeOptions);
-  const { primary, extra } = await fetchFontFromCDN(family);
+  const { primary, extra, weight: picked, weights } = await fetchFontFromCDN(family, weight);
   // Fontsource's subsets carry no name table, so the family is passed in.
   const info = await parseFont(primary, extra.length > 0 ? extra : undefined, family);
-  return { info, buffer: primary, extraBuffers: extra.length > 0 ? extra : undefined };
+  // The weight asked for, should the file's OS/2 table say otherwise.
+  return { info: { ...info, weight: picked }, buffer: primary, extraBuffers: extra.length > 0 ? extra : undefined, weights };
 }

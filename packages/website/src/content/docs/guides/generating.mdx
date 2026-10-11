@@ -45,6 +45,21 @@ bun start generate --stroke-font EMSAllure.svg --pen-width 0.06 -o output/ems-al
 
 `-c` narrows the characters (default: every glyph in the font), and `--drawing-speed` / `--stroke-pause` time the strokes as for the pipelines. The font's credits and license, which single-line fonts carry in their metadata, are written beside the bundle as `LICENSE.txt`.
 
+## Font weights
+
+A bundle can hold several weights of a font. Each weight is traced on its own, and the renderer draws the one the text's `font-weight` picks (see [`font`](/api/renderer/#font)).
+
+In the studio, open **Pipeline → Weights** while a Google font is loaded. **Draw in** picks the weight the studio loads, draws and inspects, and the chips pick the weights **Export → Download bundle** writes. The weight drawn is always one of them.
+
+From the CLI, list the weights of a Google font, or add other files of a local font:
+
+```bash
+bun start generate Caveat --weights 400,700 -o output/caveat
+bun start generate --font-file Foo-Regular.ttf --weight-file Foo-Bold.ttf -o output/foo
+```
+
+The first weight listed is the bundle's own face, the one a renderer from before weights draws. Each other weight is listed in `faces`, with its files named after the first's with its weight added (`caveat-700.ttf`, `glyphData-700.json`). A local file's weight is read from its OS/2 table.
+
 ## Options
 
 | Option | Default | Description |
@@ -61,6 +76,8 @@ bun start generate --stroke-font EMSAllure.svg --pen-width 0.06 -o output/ems-al
 ## Output format
 
 The generator outputs a compressed format with short keys to minimize bundle size. Per-glyph data includes `w` (advance width), `t` (total animation duration), and `s` (strokes). Each stroke has `p` (points as `[x, y, width]` tuples), `d` (delay), `a` (animation duration), and, for geometry strokes that carry them, `n` (nib stamps as `[pointIndex, dx, dy, major, minor, angle]`). See the `TegakiGlyphData` type for full details.
+
+A bundle of several weights also has `weight`, its own face's weight, and `faces`: for each other weight, its `weight`, font URLs and glyph data (`TegakiFace`). The family name, metrics and OpenType features are the bundle's and apply to every weight.
 
 ## Interactive generator
 

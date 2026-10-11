@@ -5,6 +5,7 @@
 import { basename, extname } from 'node:path';
 import * as opentype from 'opentype.js';
 import { charsHash } from '../constants.ts';
+import { fontWeight } from './parse.ts';
 import { subsetFont } from './subset.ts';
 
 export interface LocalFont {
@@ -46,7 +47,5 @@ export async function loadLocalFont(path: string, chars?: string): Promise<Local
 
 /** A font file's weight, from its OS/2 table (400 when it has none). */
 export async function fontFileWeight(path: string): Promise<number> {
-  const font = opentype.parse(await Bun.file(path).arrayBuffer());
-  const weight = (font.tables.os2 as { usWeightClass?: number } | undefined)?.usWeightClass;
-  return weight && weight >= 1 && weight <= 1000 ? weight : 400;
+  return fontWeight(opentype.parse(await Bun.file(path).arrayBuffer()));
 }

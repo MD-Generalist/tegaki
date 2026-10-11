@@ -1,7 +1,7 @@
 /// <reference types="bun" />
 import { describe, expect, test } from 'bun:test';
 import { DEFAULT_CHARS, type GeometryOptions, KOREAN_CHARS, SIMPLIFIED_CHINESE_CHARS } from 'tegaki-generator';
-import { buildUrlParams, defaultClipText, parseUrlState, URL_DEFAULTS } from './url-state.ts';
+import { buildUrlParams, bundleWeightsOf, defaultClipText, parseUrlState, URL_DEFAULTS } from './url-state.ts';
 
 describe('parseUrlState', () => {
   test('invalid gs value falls back to the default geometry stage instead of poisoning state', () => {
@@ -271,5 +271,28 @@ describe('stroke font pen width', () => {
     expect(parseUrlState(params).penWidth).toBe(0.1);
     expect(buildUrlParams(URL_DEFAULTS).has('pen')).toBe(false);
     expect(parseUrlState('?pen=5').penWidth).toBe(URL_DEFAULTS.penWidth);
+  });
+});
+
+describe('font weights', () => {
+  test('the drawn weight round-trips as fw; 400 stays out of the URL', () => {
+    expect(parseUrlState('?fw=700').fontWeight).toBe(700);
+    expect(buildUrlParams(parseUrlState('?fw=700')).get('fw')).toBe('700');
+    expect(buildUrlParams(parseUrlState('')).has('fw')).toBe(false);
+  });
+
+  test('the bundle always holds the drawn weight', () => {
+    expect(bundleWeightsOf(parseUrlState('?fw=700&bw=400'))).toEqual([400, 700]);
+    expect(bundleWeightsOf(parseUrlState('?fw=600'))).toEqual([600]);
+  });
+
+  test('a bundle of one weight leaves bw out of the URL', () => {
+    expect(buildUrlParams(parseUrlState('?fw=700&bw=700')).has('bw')).toBe(false);
+    expect(buildUrlParams(parseUrlState('?bw=700,400')).get('bw')).toBe('400,700');
+  });
+
+  test('what is not a weight is dropped', () => {
+    expect(parseUrlState('?fw=bold').fontWeight).toBe(400);
+    expect(parseUrlState('?bw=400,heavy,1200').bundleWeights).toEqual([400]);
   });
 });

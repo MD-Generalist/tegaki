@@ -22,7 +22,7 @@ import {
 } from '../constants.ts';
 import { enumerateVariantGlyphIds } from '../font/enumerate-variants.ts';
 import { getGsubFeatures } from '../font/hb-shaper.ts';
-import { extractGlyph, extractGlyphById, inferLineCap } from '../font/parse.ts';
+import { extractGlyph, extractGlyphById, fontWeight, inferLineCap } from '../font/parse.ts';
 import { claimedCodepoints, fontCodepoints, toUnicodeRange } from '../font/unicode-range.ts';
 import { initStraightSkeleton } from '../geometry/face-straight-skeleton.ts';
 import { isHeadlineScriptChar } from '../geometry/ordering.ts';
@@ -255,6 +255,8 @@ export interface ParsedFontInfo {
   font: opentype.Font;
   /** Additional subset fonts (e.g. CJK subsets from Google Fonts) */
   extraFonts?: opentype.Font[];
+  /** The font's weight, from its OS/2 table (400 when it has none). */
+  weight?: number;
   /**
    * Deduplicated GSUB feature tags declared by the font (e.g. `liga`, `calt`,
    * `init`/`medi`/`fina` for Arabic). Detected once at parse time via harfbuzz
@@ -365,6 +367,7 @@ export async function parseFont(buffer: ArrayBuffer, extraBuffers?: ArrayBuffer[
     lineCap: inferLineCap(font),
     font,
     extraFonts: extraFonts?.length ? extraFonts : undefined,
+    weight: fontWeight(font),
     features,
   };
 }

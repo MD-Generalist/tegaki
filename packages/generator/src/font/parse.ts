@@ -23,6 +23,12 @@ export interface RawGlyphData {
   pathString: string;
 }
 
+/** A font's weight, from its OS/2 table (400 when it has none). */
+export function fontWeight(font: opentype.Font): number {
+  const weight = (font.tables.os2 as { usWeightClass?: number } | undefined)?.usWeightClass;
+  return weight && weight >= 1 && weight <= 1000 ? weight : 400;
+}
+
 /**
  * Infer stroke line cap from font properties.
  *

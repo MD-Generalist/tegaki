@@ -16,6 +16,6 @@ const bundle = createBundle({
 });
 ```
 
-`bundleForWeight(bundle, weight)` returns the bundle as one weight draws it, and `bundleWeights(bundle)` lists the weights it has. `textToSvg` takes a `fontWeight` option.
+`bundleForWeight(bundle, weight)` returns the bundle as one weight draws it, `bundleWeights(bundle)` lists the weights it has, and `matchFontWeight(weights, weight)` is the CSS font matching the renderer uses to pick a weight. `textToSvg` takes a `fontWeight` option.
 
 Bundles without `faces` render as before, and the bundle format version stays 1. One change applies to every bundle: the renderer's root now sets `font-synthesis-weight: none`. The browser no longer fakes a bold from a lighter face, because the strokes would not follow it. A `font-weight: bold` above a single-weight bundle now leaves its text layer and its fallback characters in the bundle's weight.
